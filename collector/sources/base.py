@@ -79,3 +79,15 @@ class Source:
     def finish_login(self, creds: dict, code: str, state: str, redirect_uri: str) -> dict:
         """Returns the values to save (tokens)."""
         raise NotImplementedError
+
+
+_ISO_DURATION = re.compile(r"P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?")
+
+
+def parse_iso_duration(value: str) -> int:
+    """ISO 8601 duration like "PT3M59S" to whole seconds. 0 if it can't be read."""
+    m = _ISO_DURATION.fullmatch(value or "")
+    if not m or not any(m.groups()):
+        return 0
+    days, hours, minutes, seconds = (float(g) if g else 0 for g in m.groups())
+    return round(days * 86400 + hours * 3600 + minutes * 60 + seconds)

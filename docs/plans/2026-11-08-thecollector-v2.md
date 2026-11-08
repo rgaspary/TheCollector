@@ -236,6 +236,8 @@ Commit after each source: `feat(sources): <Service>`.
 
 ### Task 6: YouTube Music
 
+> Built 2026-11-08 with sample responses written from YouTube's published API formats (`tests/fixtures/youtube_music/`). When the user's API key is available, call each endpoint once and replace the samples with trimmed real responses.
+
 **Files:** Create `collector/sources/youtube_music.py`; Modify `collector/sources/base.py` (add `parse_iso_duration`); Test `tests/test_sources_youtube_music.py`
 
 **Interfaces:**
