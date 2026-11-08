@@ -35,6 +35,26 @@ Steps use checkbox (`- [ ]`) syntax for tracking.
 
 ---
 
+## Branches
+
+Each feature has its own branch cut from `v2.0`. When a branch's tasks are done and its tests pass, open a pull request into `v2.0` and merge it. Merge in the order below: each branch builds on the ones above it. Before starting a branch, update it from `v2.0` (`git merge v2.0`) so it has everything merged so far. `v2.0` merges into `main` at release.
+
+| # | Branch | Tasks | Delivers |
+|---|---|---|---|
+| 1 | `feature/foundation` | 1–5 | Config (optional NextUp, per-OS paths), track model, HTTP helper, source interface, credential store, Spotify as a source |
+| 2 | `feature/streaming-sources` | 6–8 | YouTube Music, SoundCloud, TIDAL, Qobuz, Apple Music file import |
+| 3 | `feature/local-libraries` | 9–12 | Strawberry, iTunes / Apple Music, MediaMonkey, music folder readers |
+| 4 | `feature/playlist-export` | 13 | Playlist formats and the per-player format table |
+| 5 | `feature/missing-tracks-export` | 14–15 | Service-neutral NextUp note, JSON / CSV / Markdown / TXT export |
+| 6 | `feature/server-api` | 16–17 | Library, source, credential, import, analyze and export routes |
+| 7 | `feature/step-screens` | 18 | Screen router with slide and fade transitions |
+| 8 | `feature/source-picker` | 19–20 | Library and source tiles with icons, credential set-up / fix / test |
+| 9 | `feature/import-review-screens` | 21 | Link, Apple Music file import and review screens |
+| 10 | `feature/export-screens` | 22 | Export, missing tracks and done screens |
+| 11 | `release/v2.0-checks` | 23–24 | Player import check, docs, version 2.0.0 |
+
+---
+
 ## File structure
 
 ```
@@ -97,7 +117,7 @@ tests/
 - Create: `.gitignore` (`collector.log`, `__pycache__/`), `CHANGELOG.md`, `docs/notes/2026-11-api-spike.md`, `tests/fixtures/<source>/` (one recorded response per endpoint)
 - Modify: `collector/__init__.py`
 
-- [x] **Step 1:** Git repo and public GitHub repo exist (done 2026-11-08: `rgaspary/TheCollector`, MIT). Work on the `v2.0` branch; merge into `main` at release.
+- [x] **Step 1:** Git repo and public GitHub repo exist (done 2026-11-08: `rgaspary/TheCollector`, MIT). Work happens on the feature branches in the Branches section; they merge into `v2.0`, which merges into `main` at release.
 - [ ] **Step 2:** Add `__version__ = "2.0.0-dev"` to `collector/__init__.py`. Add `CHANGELOG.md` with an `## 2.0.0 (unreleased)` heading.
 - [ ] **Step 3a:** Apple Music: get a 3-track playlist exported as XML, plain text and Unicode text from the Mac Music app and from iTunes for Windows (from the user, or a VM). Save trimmed copies to `tests/fixtures/apple_music/` (strip `Location` paths and personal data). Record the text-export column names, encodings and the `Time` unit. Check whether the Apple Music app for Windows can export a playlist; record the answer for the import screen's Windows note.
 - [ ] **Step 3:** For each of Qobuz, SoundCloud, TIDAL, YouTube Music, use the user's test credentials (ask the user for them, never commit them) to call the endpoint in the spec table once with `curl`. Save each trimmed response as `tests/fixtures/<source>/playlist.json` (and page 2 where paging exists). Strip personal data.
