@@ -9,6 +9,9 @@ import unicodedata
 from dataclasses import dataclass, field
 
 from .library import LocalTrack
+from .tracks import SourceTrack
+
+SpotifyTrack = SourceTrack  # v1 name, kept for one release
 
 MATCH_THRESHOLD = 0.92
 PARTIAL_THRESHOLD = 0.6
@@ -133,20 +136,6 @@ def similarity(a: str, b: str) -> float:
     if abs(len(a) - len(b)) / longest > 1 - PARTIAL_THRESHOLD:
         return 0.0  # can't reach the threshold; skip the expensive part
     return 1 - levenshtein(a, b) / longest
-
-
-@dataclass
-class SpotifyTrack:
-    id: str
-    title: str
-    artists: list[str]
-    album: str
-    duration: int  # seconds
-    url: str
-
-    @property
-    def artist(self) -> str:
-        return ", ".join(self.artists)
 
 
 @dataclass
