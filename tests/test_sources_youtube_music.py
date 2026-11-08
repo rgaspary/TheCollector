@@ -68,6 +68,34 @@ class Titles(unittest.TestCase):
         self.assertEqual(clean_video_title("Song (Live at Wembley)"), "Song (Live at Wembley)")
         self.assertEqual(clean_video_title("Song (Acoustic) (Official Audio)"), "Song (Acoustic)")
 
+    def test_real_world_titles(self):
+        # Taken from a real public playlist read with a live key.
+        cases = [
+            ("Matchbox Twenty - 3AM (Official Video) [HD Remaster]", "Matchbox Twenty", ("3AM", ["Matchbox Twenty"])),
+            ("Green Day - Basket Case [Official Music Video] (4K Upgrade)", "Green Day", ("Basket Case", ["Green Day"])),
+            ("Red Hot Chili Peppers - Otherside (Official Music Video) [HD UPGRADE]", "Red Hot Chili Peppers",
+             ("Otherside", ["Red Hot Chili Peppers"])),
+            ("The Cranberries - Linger (4K Official Music Video)", "TheCranberriesVEVO", ("Linger", ["The Cranberries"])),
+            ("No Doubt - Don't Speak (Official 4K Music Video)", "NoDoubtVEVO", ("Don't Speak", ["No Doubt"])),
+            ("Filter - Take A Picture (Official HD Music Video)", "FILTER", ("Take A Picture", ["Filter"])),
+            ("Tonic - Open Up Your Eyes (Closed-Captioned)", "TonicVEVO", ("Open Up Your Eyes", ["Tonic"])),
+            ("Garbage - Special (w/Titles)", "GarbageVEVO", ("Special", ["Garbage"])),
+            ("The Cranberries - Dreams (Dir: Peter Scammell) (Official Music Video)", "x", ("Dreams", ["The Cranberries"])),
+            ("Fastball - Out Of My Head (Official video) www.fastballtheband.com", "fastball",
+             ("Out Of My Head", ["Fastball"])),
+            ('The Offspring - "Self Esteem"', "Epitaph Records", ("Self Esteem", ["The Offspring"])),
+            ("Rancid - 'Ruby Soho' (Music Video)", "Rancid", ("Ruby Soho", ["Rancid"])),
+            ('"Desperately Wanting" official music video', "Better Than Ezra", ("Desperately Wanting", ["Better Than Ezra"])),
+            ("Vertical Horizon- You're A God", "x", ("You're A God", ["Vertical Horizon"])),
+            ("Pearl Jam - Better Man (Live from Madison Square Garden)", "PearljamVEVO",
+             ("Better Man (Live from Madison Square Garden)", ["Pearl Jam"])),
+            ("Blur - Song 2 (2012 Remastered Version)", "x", ("Song 2 (2012 Remastered Version)", ["Blur"])),
+            ("blink-182 - Dammit", "blink182VEVO", ("Dammit", ["blink-182"])),
+            ("Eagle-Eye Cherry - Save Tonight", "x", ("Save Tonight", ["Eagle-Eye Cherry"])),
+        ]
+        for video_title, channel, expected in cases:
+            self.assertEqual(split_youtube_title(video_title, channel), expected, video_title)
+
     def test_iso_duration(self):
         self.assertEqual(parse_iso_duration("PT3M59S"), 239)
         self.assertEqual(parse_iso_duration("PT1H2M3S"), 3723)

@@ -22,12 +22,34 @@ NOT_ENABLED = CredentialError(
     "The YouTube Data API isn't turned on for this key's project.",
     fix="In Google Cloud Console open APIs & Services → Library, find YouTube Data API v3 and click Enable.")
 
-# "(Official Video)", "[Official Music Video]", "(Lyrics)", "(Visualizer)", "[HD]" ... but not "(Live)".
-_NOISE = re.compile(
-    r"\s*[\(\[]\s*(?:official\s+)?(?:hd\s+|4k\s+)?(?:music\s+|lyric\s+)?"
-    r"(?:video|audio|visuali[sz]er|lyrics?|hd|hq|4k)(?:\s+video)?\s*[\)\]]",
-    re.IGNORECASE)
-_DASH = re.compile(r"\s+[-–—]\s+")
+# Bracketed groups made only of these words are video labels, not part of the song name:
+# "(Official Video)", "[HD UPGRADE]", "(4K Official Music Video)", "(Closed-Captioned)", "(w/Titles)".
+# "(Live)", "(Acoustic)" and "(2012 Remastered Version)" stay.
+_LABEL_WORDS = {"official", "music", "lyric", "lyrics", "video", "audio", "visualizer", "visualiser", "hd", "hq",
+                "4k", "upgrade", "upgraded", "remaster", "remastered", "closed", "captioned", "w", "titles"}
+_LABEL_CORE = {"video", "audio", "visualizer", "visualiser", "lyric", "lyrics", "hd", "hq", "4k", "upgrade",
+               "upgraded", "captioned", "titles"}
+_GROUP = re.compile(r"\s*[\(\[]([^\(\)\[\]]*)[\)\]]")
+_DIRECTOR = re.compile(r"\s*[\(\[]\s*(?:dir\.?|directed\s+by)\b[^\)\]]*[\)\]]", re.IGNORECASE)
+_URL = re.compile(r"\s*(?:https?://|www\.)\S+", re.IGNORECASE)
+_TRAILING_LABEL = re.compile(r"\s+(?:official(?:\s+music)?|music)\s+video\s*$", re.IGNORECASE)
+_DASH = re.compile(r"\s*[-–—]\s+")
+_QUOTES = "\"'“”‘’"
+
+
+def _is_label(group: str) -> bool:
+    words = set(re.findall(r"[a-z0-9]+", group.lower()))
+    if not words or not words <= _LABEL_WORDS or not words & _LABEL_CORE:
+        return False
+    # "(Remastered)" alone names a version; "[HD Remaster]" is about the picture.
+    return not (words & {"remaster", "remastered"}) or bool(words & {"hd", "4k"})
+
+
+def _unquote(text: str) -> str:
+    text = text.strip()
+    if len(text) > 1 and text[0] in _QUOTES and text[-1] in _QUOTES:
+        return text[1:-1].strip()
+    return text
 
 
 def parse_playlist_id(text: str) -> str:
@@ -49,7 +71,10 @@ def parse_playlist_id(text: str) -> str:
 
 
 def clean_video_title(title: str) -> str:
-    return re.sub(r"\s{2,}", " ", _NOISE.sub("", title)).strip()
+    title = _DIRECTOR.sub("", _URL.sub("", title))
+    title = _GROUP.sub(lambda m: "" if _is_label(m.group(1)) else m.group(0), title)
+    title = _TRAILING_LABEL.sub("", title)
+    return re.sub(r"\s{2,}", " ", title).strip()
 
 
 def split_youtube_title(video_title: str, channel: str) -> tuple[str, list[str]]:
@@ -57,12 +82,12 @@ def split_youtube_title(video_title: str, channel: str) -> tuple[str, list[str]]
     title = clean_video_title(video_title)
     channel = (channel or "").strip()
     if channel.endswith(" - Topic"):  # YouTube Music's auto-generated artist channels
-        return title, [channel[: -len(" - Topic")].strip()]
+        return _unquote(title), [channel[: -len(" - Topic")].strip()]
     parts = _DASH.split(title, maxsplit=1)
-    if len(parts) == 2 and parts[0] and parts[1]:
-        return parts[1].strip(), [parts[0].strip()]
+    if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+        return _unquote(parts[1]), [_unquote(parts[0])]
     artist = re.sub(r"\s*VEVO$", "", channel, flags=re.IGNORECASE).strip()
-    return title, [artist or "Unknown Artist"]
+    return _unquote(title), [artist or "Unknown Artist"]
 
 
 class YouTubeMusicSource(Source):

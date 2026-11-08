@@ -236,7 +236,7 @@ Commit after each source: `feat(sources): <Service>`.
 
 ### Task 6: YouTube Music
 
-> Built 2026-11-08 with sample responses written from YouTube's published API formats (`tests/fixtures/youtube_music/`). When the user's API key is available, call each endpoint once and replace the samples with trimmed real responses.
+> Built 2026-11-08 with sample responses written from YouTube's published API formats (`tests/fixtures/youtube_music/`). Checked the same day with a real key against a public 167-song playlist: the live responses have every field the samples use, so the samples stay. Title clean-up was widened for labels seen in real titles ("[HD UPGRADE]", "(4K Official Music Video)", "(Closed-Captioned)", quoted titles, trailing web addresses); `test_real_world_titles` pins them. Titles uploaded as "Song - Artist" can't be told apart from "Artist - Song" and are left to matching.
 
 **Files:** Create `collector/sources/youtube_music.py`; Modify `collector/sources/base.py` (add `parse_iso_duration`); Test `tests/test_sources_youtube_music.py`
 
