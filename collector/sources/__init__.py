@@ -21,4 +21,8 @@ def detect(link: str) -> str | None:
     return None
 
 
+from .spotify import SpotifySource  # noqa: E402  (after the helpers above)
+
+register(SpotifySource())
+
 __all__ = ["REGISTRY", "CredentialError", "Field", "Source", "SourceError", "detect", "get_source", "register"]

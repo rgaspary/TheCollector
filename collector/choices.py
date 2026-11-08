@@ -9,6 +9,8 @@ MISSING = "missing"
 
 
 class Choices:
+    """Picks are stored as "<source>:<track id>". v1 stored bare Spotify IDs; those still count."""
+
     def __init__(self, path: Path = CHOICES_FILE):
         self.path = path
         try:
@@ -16,11 +18,14 @@ class Choices:
         except (OSError, ValueError):
             self.data = {}
 
-    def get(self, spotify_id: str) -> str | None:
+    def get(self, source: str, track_id: str) -> str | None:
         """A local file path, MISSING, or None if never decided."""
-        return self.data.get(spotify_id)
+        found = self.data.get(f"{source}:{track_id}")
+        if found is None and source == "spotify":
+            found = self.data.get(track_id)
+        return found
 
-    def update(self, decisions: dict[str, str]):
-        self.data.update(decisions)
+    def update(self, source: str, decisions: dict[str, str]):
+        self.data.update({f"{source}:{tid}": pick for tid, pick in decisions.items()})
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(self.data, indent=1))

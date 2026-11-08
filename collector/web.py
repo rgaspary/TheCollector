@@ -10,12 +10,16 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from . import __version__
 from . import config as config_mod
 from .choices import MISSING, Choices
+from .credentials import CredentialStore
 from .library import LocalTrack, load_library
 from .matching import MatchResult, match_playlist
 from .playlist import write_m3u8
-from .spotify import Playlist, SpotifyClient, SpotifyError
+from .sources import CredentialError, SourceError, get_source
+from .sources.spotify import migrate_v1
+from .tracks import Playlist
 from .vault import NoteResult, write_missing_note
 
 STATIC = config_mod.ROOT / "static"
@@ -25,7 +29,9 @@ MAX_ANALYSES = 10
 class App:
     def __init__(self, cfg: config_mod.Config):
         self.cfg = cfg
-        self.spotify = SpotifyClient(cfg)
+        self.spotify = get_source("spotify")
+        self.store = CredentialStore()
+        migrate_v1(self.store, cfg)
         self.choices = Choices()
         self.lock = threading.Lock()
         self.analyses: OrderedDict[str, tuple[Playlist, list[MatchResult]]] = OrderedDict()
@@ -51,20 +57,37 @@ class App:
             return
         new.host, new.port = self.cfg.host, self.cfg.port  # the server is already bound to these
         self.cfg = new
-        self.spotify.config = new
+        if new.legacy_spotify_client_id and not self.store.get("spotify").get("client_id"):
+            self.store.save("spotify", {"client_id": new.legacy_spotify_client_id})
         print("Reloaded config.toml", flush=True)
 
+    def spotify_creds(self) -> dict:
+        return self.store.get("spotify")
+
+    def logout(self):
+        self.store.remove("spotify", self.spotify.token_keys)
+
     def status(self) -> dict:
+        creds = self.spotify_creds()
         return {
-            "client_id_set": bool(self.cfg.legacy_spotify_client_id),
-            "logged_in": self.spotify.logged_in,
+            "version": __version__,
+            "client_id_set": bool(creds.get("client_id")),
+            "logged_in": self.spotify.has_token(creds),
             "redirect_uri": self.cfg.redirect_uri,
             "playlist_dir": str(self.cfg.playlist_dir),
             "notes_folder": self.cfg.notes_folder,
         }
 
     def analyze(self, link: str) -> dict:
-        playlist = self.spotify.get_playlist(link)
+        creds = self.spotify_creds()
+        try:
+            playlist = self.spotify.get_playlist(link, creds)
+        except CredentialError as e:
+            self.store.mark_invalid("spotify", str(e), e.fix)
+            self.logout()
+            raise
+        self.store.save("spotify", creds)  # keeps a refreshed token
+        self.store.mark_ok("spotify")
         library = load_library(self.cfg.library_file)
         results = match_playlist(playlist.tracks, library)
         aid = secrets.token_urlsafe(8)
@@ -75,7 +98,7 @@ class App:
 
         tracks = []
         for i, r in enumerate(results):
-            remembered = self.choices.get(r.spotify.id) if r.status == "close" else None
+            remembered = self.choices.get(playlist.source, r.spotify.id) if r.status == "close" else None
             paths = {c.track.path for c in r.candidates}
             if remembered and remembered != MISSING and remembered not in paths:
                 remembered = None  # that file is gone or no longer a candidate
@@ -127,7 +150,7 @@ class App:
         if self.cfg.nextup_enabled:
             note = write_missing_note(self.cfg.vault_path, self.cfg.notes_folder, self.cfg.area,
                                       playlist.name, playlist.url, missing, found)
-        self.choices.update(remember)
+        self.choices.update(playlist.source, remember)
 
         obsidian = None
         if note.path:
@@ -185,16 +208,19 @@ def make_handler(app: App):
                 return self._json(app.status())
             if url.path == "/login":
                 try:
-                    return self._redirect(app.spotify.login_url())
-                except SpotifyError as e:
+                    return self._redirect(app.spotify.login_url(app.spotify_creds(), app.cfg.redirect_uri))
+                except SourceError as e:
                     return self._redirect("/?error=" + urllib.parse.quote(str(e)))
             if url.path == "/callback":
                 q = urllib.parse.parse_qs(url.query)
                 if "error" in q:
                     return self._redirect("/?error=" + urllib.parse.quote("Spotify login was cancelled."))
                 try:
-                    app.spotify.finish_login(q.get("code", [""])[0], q.get("state", [""])[0])
-                except SpotifyError as e:
+                    tokens = app.spotify.finish_login(app.spotify_creds(), q.get("code", [""])[0],
+                                                      q.get("state", [""])[0], app.cfg.redirect_uri)
+                    app.store.save("spotify", tokens)
+                    app.store.mark_ok("spotify")
+                except SourceError as e:
                     return self._redirect("/?error=" + urllib.parse.quote(str(e)))
                 return self._redirect("/?connected=1")
             self._send(404, b"Not found", "text/plain")
@@ -221,9 +247,9 @@ def make_handler(app: App):
                 if self.path == "/api/build":
                     return self._json(app.build(str(body.get("analysis_id", "")), body.get("decisions") or {}))
                 if self.path == "/api/logout":
-                    app.spotify.logout()
+                    app.logout()
                     return self._json({"ok": True})
-            except (SpotifyError, ValueError, FileNotFoundError) as e:
+            except (SourceError, ValueError, FileNotFoundError) as e:
                 return self._json({"error": str(e)}, 400)
             except OSError as e:
                 return self._json({"error": f"Couldn't write a file: {e}"}, 500)
