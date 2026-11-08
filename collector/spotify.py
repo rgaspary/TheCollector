@@ -54,14 +54,14 @@ class SpotifyClient:
         return bool(self._token.get("refresh_token") or self._token.get("access_token"))
 
     def login_url(self) -> str:
-        if not self.config.client_id:
+        if not self.config.legacy_spotify_client_id:
             raise SpotifyError("Add your Spotify Client ID to config.toml first.")
         verifier = secrets.token_urlsafe(64)
         challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
         state = secrets.token_urlsafe(16)
         self._pending[state] = verifier
         return AUTH_URL + "?" + urllib.parse.urlencode({
-            "client_id": self.config.client_id,
+            "client_id": self.config.legacy_spotify_client_id,
             "response_type": "code",
             "redirect_uri": self.config.redirect_uri,
             "code_challenge_method": "S256",
@@ -78,7 +78,7 @@ class SpotifyClient:
             "grant_type": "authorization_code",
             "code": code,
             "redirect_uri": self.config.redirect_uri,
-            "client_id": self.config.client_id,
+            "client_id": self.config.legacy_spotify_client_id,
             "code_verifier": verifier,
         }))
 
@@ -125,7 +125,7 @@ class SpotifyClient:
                 self._save_token(self._post_token({
                     "grant_type": "refresh_token",
                     "refresh_token": self._token["refresh_token"],
-                    "client_id": self.config.client_id,
+                    "client_id": self.config.legacy_spotify_client_id,
                 }))
             except SpotifyError:
                 self.logout()

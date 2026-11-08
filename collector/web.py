@@ -16,7 +16,7 @@ from .library import LocalTrack, load_library
 from .matching import MatchResult, match_playlist
 from .playlist import write_m3u8
 from .spotify import Playlist, SpotifyClient, SpotifyError
-from .vault import write_missing_note
+from .vault import NoteResult, write_missing_note
 
 STATIC = config_mod.ROOT / "static"
 MAX_ANALYSES = 10
@@ -56,7 +56,7 @@ class App:
 
     def status(self) -> dict:
         return {
-            "client_id_set": bool(self.cfg.client_id),
+            "client_id_set": bool(self.cfg.legacy_spotify_client_id),
             "logged_in": self.spotify.logged_in,
             "redirect_uri": self.cfg.redirect_uri,
             "playlist_dir": str(self.cfg.playlist_dir),
@@ -65,7 +65,7 @@ class App:
 
     def analyze(self, link: str) -> dict:
         playlist = self.spotify.get_playlist(link)
-        library = load_library(self.cfg.strawberry_db)
+        library = load_library(self.cfg.library_file)
         results = match_playlist(playlist.tracks, library)
         aid = secrets.token_urlsafe(8)
         with self.lock:
@@ -123,8 +123,10 @@ class App:
                     raise ValueError(f'Choose an option for "{r.spotify.title}".')
 
         m3u = write_m3u8(playlist.name, chosen, self.cfg.playlist_dir) if chosen else None
-        note = write_missing_note(self.cfg.vault_path, self.cfg.notes_folder, self.cfg.area,
-                                  playlist.name, playlist.url, missing, found)
+        note = NoteResult(None, 0, 0)
+        if self.cfg.nextup_enabled:
+            note = write_missing_note(self.cfg.vault_path, self.cfg.notes_folder, self.cfg.area,
+                                      playlist.name, playlist.url, missing, found)
         self.choices.update(remember)
 
         obsidian = None
