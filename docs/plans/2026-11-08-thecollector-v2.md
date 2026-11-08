@@ -2,9 +2,9 @@
 
 Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Turn TheCollector into a multi-source, step-by-step app (v2.0.0) that imports playlists from seven streaming services, exports the matched playlist in eight formats, and exports missing tracks in four formats.
+**Goal:** Turn TheCollector into a multi-source, step-by-step app (v2.0.0) that runs on Linux, Windows and macOS, imports playlists from seven streaming services, and matches them against the user's own library (Strawberry, iTunes/Apple Music, MediaMonkey, or a music folder). It exports the matched playlist in the right format for the user's player, and exports missing tracks in four formats.
 
-**Architecture:** A `collector/sources/` package puts every service behind one `Source` interface. A `CredentialStore` keeps per-source secrets and their status, and `collector/exporters/` holds one small writer per format. `web.py` gets source/credential/export routes, and the frontend becomes ES modules with a tiny screen router that runs the slide-and-fade transitions.
+**Architecture:** A `collector/sources/` package puts every service behind one `Source` interface, and `collector/libraries/` does the same for local libraries (all produce `LocalTrack` lists). A `CredentialStore` keeps per-source secrets and their status, and `collector/exporters/` holds one small writer per format. `web.py` gets source/credential/export routes, and the frontend becomes ES modules with a tiny screen router that runs the slide-and-fade transitions.
 
 **Tech Stack:** Python 3.11+ standard library only (`urllib`, `json`, `xml.etree`, `plistlib`, `csv`, `hashlib`, `secrets`), `unittest`. Vanilla JS (ES modules) + CSS, no build step.
 
@@ -20,15 +20,18 @@ Steps use checkbox (`- [ ]`) syntax for tracking.
 - Transition: 320 ms, `cubic-bezier(.2,.7,.2,1)`, `translateX(48px)` + opacity. Reduced motion: opacity only, 150 ms.
 - Keep `/callback` as the Spotify redirect path (already registered by the user).
 - Tests: `python3 -m unittest discover tests`. No test makes a real network call.
+- Runs on Linux, Windows and macOS with Python 3.11+. Use `pathlib`, never hard-coded `/`, and branch on `sys.platform` only inside `collector/platform_paths.py`. Linux-only pieces (`window.py`, `collector-launch.sh`) stay optional.
+- Personal settings live in `config.toml` (git-ignored). Default changes go in `config.example.toml`.
 - User-facing text: plain, short, no jargon (matches the v1 UI voice).
 
 ## Review Focus
 
-1. **Existing v1 notes and choices:** notes with `[Spotify](url)` links and `choices.json` keyed by bare Spotify IDs must keep working (no duplicate tasks, remembered picks still applied). Tests in Tasks 5 and 10.
-2. **Credentials that go bad mid-flow** (token revoked between source pick and Analyze): `/api/analyze` must answer `{"code": "credentials"}` and the UI must land on the Fix screen, not a generic error. Tests in Tasks 4 and 13.
-3. **Track names with commas, quotes, `&`, `<`, non-Latin script, and file paths with spaces/`#`** in every export format. Tests in Tasks 9 and 11.
-4. **Playlist names that aren't safe file names** (`AC/DC: Best?`, empty, only dots): every writer uses `safe_filename`. Test in Task 9.
-5. **No NextUp installed** (missing `[vault]` or the NextUp config file): app starts, missing-tracks export works, NextUp toggle hidden. Tests in Tasks 2 and 13.
+1. **Existing v1 notes and choices:** notes with `[Spotify](url)` links and `choices.json` keyed by bare Spotify IDs must keep working (no duplicate tasks, remembered picks still applied). Tests in Tasks 5 and 14.
+2. **Credentials that go bad mid-flow** (token revoked between source pick and Analyze): `/api/analyze` must answer `{"code": "credentials"}` and the UI must land on the Fix screen, not a generic error. Tests in Tasks 4 and 17.
+3. **Track names with commas, quotes, `&`, `<`, non-Latin script, and file paths with spaces/`#`** in every export format. Tests in Tasks 13 and 15.
+4. **Playlist names that aren't safe file names** (`AC/DC: Best?`, empty, only dots): every writer uses `safe_filename`. Test in Task 13.
+5. **No NextUp installed** (missing `[vault]` or the NextUp config file): app starts, missing-tracks export works, NextUp toggle hidden. Tests in Tasks 2 and 17.
+6. **Library files in odd shapes:** iTunes XML with Windows `file://localhost/C:/…` locations, MediaMonkey paths without drive letters, music files with no tags or broken tags. Tests in Tasks 10, 11 and 12.
 
 ---
 
@@ -37,7 +40,8 @@ Steps use checkbox (`- [ ]`) syntax for tracking.
 ```
 collector/
   __init__.py            + __version__
-  config.py              [vault] optional, [export] dir, Config.vault_* may be None
+  config.py              [vault] optional, [export] dir, [library] type/path/folders, Config.vault_* may be None
+  platform_paths.py      NEW  per-OS data folder and default library paths
   http.py                NEW  request_json(), HttpError
   credentials.py         NEW  CredentialStore
   tracks.py              NEW  SourceTrack (moved from matching.py), Playlist
@@ -52,8 +56,17 @@ collector/
     es256.py             NEW  minimal ES256 JWT signer
     qobuz.py             NEW
     amazon_music.py      NEW
+  libraries/
+    __init__.py          NEW  LIBRARIES, get_library()
+    base.py              NEW  Library, LibraryError
+    strawberry.py        MOVED from collector/library.py
+    itunes.py            NEW  iTunes / Apple Music Library XML
+    mediamonkey.py       NEW  MM.DB / MM5.DB
+    folder.py            NEW  folder scan + cache
+    tags.py              NEW  ID3, FLAC, MP4, Ogg, ASF tag readers
   exporters/
     __init__.py          NEW  PLAYLIST_FORMATS, MISSING_FORMATS
+    players.py           NEW  PLAYERS: app → recommended format + import steps
     playlist_formats.py  NEW  m3u8/m3u/pls/xspf/itunes_xml/wpl/csv/json
     missing_formats.py   NEW  json/csv/md/txt
   matching.py            imports SourceTrack from tracks.py
@@ -65,12 +78,14 @@ static/
   index.html             screen containers, step bar, type="module"
   style.css              screens, tiles, transitions
   js/main.js api.js router.js state.js
-  js/screens/source.js credentials.js link.js review.js export.js missing.js done.js
+  js/screens/library.js source.js credentials.js link.js review.js export.js missing.js done.js
   icons/services/*.svg   official service icons + SOURCES.md
+  icons/apps/*.svg       official player/library app icons (same SOURCES.md rules)
 tests/
   test_collector.py      existing (updated imports)
   test_credentials.py test_http.py test_sources_*.py test_exporters.py test_web.py
   fixtures/<source>/*.json
+  fixtures/libraries/    small iTunes XML, MediaMonkey DB, tagged audio files (a few KB each)
 ```
 
 ---
@@ -83,22 +98,23 @@ tests/
 - Create: `.gitignore` (`collector.log`, `__pycache__/`), `CHANGELOG.md`, `docs/notes/2026-11-api-spike.md`, `tests/fixtures/<source>/` (one recorded response per endpoint)
 - Modify: `collector/__init__.py`
 
-- [ ] **Step 1:** `git init`, commit v1 as-is: `git commit -m "chore: v1.0 baseline"`.
+- [x] **Step 1:** Git repo and public GitHub repo exist (done 2026-11-08: `rgaspary/TheCollector`, MIT). Work on the `v2.0` branch; merge into `main` at release.
 - [ ] **Step 2:** Add `__version__ = "2.0.0-dev"` to `collector/__init__.py`. Add `CHANGELOG.md` with an `## 2.0.0 (unreleased)` heading.
 - [ ] **Step 3:** For each of Apple Music, Qobuz, Amazon Music, SoundCloud, TIDAL, YouTube Music, use the user's test credentials (ask the user for them, never commit them) to call the endpoint in the spec table once with `curl`. Save each trimmed response as `tests/fixtures/<source>/playlist.json` (and page 2 where paging exists). Strip personal data.
 - [ ] **Step 4:** Write `docs/notes/2026-11-api-spike.md`: per source, the confirmed URL, auth header, paging field, and the JSON paths for title/artists/album/duration/ISRC/url. If an endpoint differs from the spec table, update the spec table. If Amazon access is refused, record that and keep Task 8 to "setup + clear refusal message".
+- [ ] **Step 4b:** Get a MediaMonkey 5 `MM5.DB` (from the user's Windows PC or a fresh install with 3 tracks added). Record the `Songs` and `Medias` columns and how drive letters are stored in the spike notes. Do the same for an iTunes `iTunes Library.xml` from Windows and a Music app `Library.xml` from macOS (3 tracks each). Don't commit personal libraries.
 - [ ] **Step 5:** Commit: `chore: start v2.0, record API spike`.
 
 ---
 
 ## Phase 1 — Backend foundation
 
-### Task 2: Config — optional vault, export folder
+### Task 2: Config — optional vault, export folder, per-OS paths
 
-**Files:** Modify `collector/config.py`, `config.toml`; Test `tests/test_config.py`
+**Files:** Create `collector/platform_paths.py`; Modify `collector/config.py`, `config.example.toml`; Test `tests/test_config.py`
 
 **Interfaces:**
-- Produces: `Config.vault_path: Path | None`, `Config.vault_name: str | None`, `Config.notes_folder: str | None`, `Config.export_dir: Path`, `Config.nextup_enabled -> bool` (property), `Config.legacy_spotify_client_id: str` (from `[spotify] client_id` or env `SPOTIFY_CLIENT_ID`). `Config.client_id` is removed.
+- Produces: `platform_paths.data_dir(platform: str = sys.platform) -> Path` (Linux `$XDG_DATA_HOME/thecollector` or `~/.local/share/thecollector`, Windows `%APPDATA%/TheCollector`, macOS `~/Library/Application Support/TheCollector`); `platform_paths.default_library_path(kind: str, platform: str = sys.platform) -> Path | None` with the defaults in the spec's library table; `config.DATA_DIR = platform_paths.data_dir()`. `Config.library_type: str` (default `"strawberry"`), `Config.library_path: Path | None`, `Config.library_folders: list[Path]`, `Config.playlist_dir: Path`, `Config.vault_path: Path | None`, `Config.vault_name: str | None`, `Config.notes_folder: str | None`, `Config.export_dir: Path`, `Config.nextup_enabled -> bool` (property), `Config.legacy_spotify_client_id: str` (from `[spotify] client_id` or env `SPOTIFY_CLIENT_ID`). `Config.client_id` is removed.
 
 - [ ] **Step 1: Failing tests**
 
@@ -110,12 +126,17 @@ def test_missing_nextup_file(self):   # [vault] nextup_config points to a missin
     self.assertFalse(config.load(path).nextup_enabled)
 def test_export_dir_default(self):
     self.assertEqual(config.load(path).export_dir, Path.home() / "Music/TheCollector Exports")
+def test_data_dir_per_platform(self):  # env patched: APPDATA=C:/Users/a/AppData/Roaming
+    self.assertEqual(platform_paths.data_dir("win32"), Path("C:/Users/a/AppData/Roaming/TheCollector"))
+    self.assertEqual(platform_paths.data_dir("darwin"), Path.home() / "Library/Application Support/TheCollector")
+def test_v1_library_keys_still_read(self):  # [library] strawberry_db = "..." with no type
+    cfg = config.load(path); self.assertEqual((cfg.library_type, cfg.library_path), ("strawberry", Path("/x/strawberry.db")))
 ```
 
 - [ ] **Step 2:** Run `python3 -m unittest tests.test_config -v` → FAIL.
-- [ ] **Step 3:** Implement in `config.load`. Add `[export] dir` to `config.toml`.
+- [ ] **Step 3:** Implement in `config.load`. Add `[export]` and the new `[library]` keys to `config.example.toml` (the user's own `config.toml` keeps working through the v1-key fallback).
 - [ ] **Step 4:** Run → PASS. Full suite still passes.
-- [ ] **Step 5:** Commit `feat(config): optional NextUp vault, export folder`.
+- [ ] **Step 5:** Commit `feat(config): optional NextUp vault, export folder, per-OS paths`.
 
 ### Task 3: Track model + HTTP helper
 
@@ -224,11 +245,73 @@ Commit after each source: `feat(sources): <Service>`.
 
 ---
 
-## Phase 3 — Exporters
+## Phase 3 — Local libraries
 
-### Task 9: Playlist formats
+Each library reader turns the user's music app into the same `list[LocalTrack]` that `matching.match_playlist` already takes. Tests use small fixture files in `tests/fixtures/libraries/` (build them in the test `setUp` where possible instead of committing binaries).
 
-**Files:** Create `collector/exporters/__init__.py`, `collector/exporters/playlist_formats.py`; Modify `collector/playlist.py` (keep `safe_filename`, remove `write_m3u8`); Test `tests/test_exporters.py`
+### Task 9: Library interface + Strawberry reader
+
+**Files:** Create `collector/libraries/__init__.py`, `collector/libraries/base.py`; Move `collector/library.py` → `collector/libraries/strawberry.py`; Modify `collector/web.py` (use `get_library`), `tests/test_collector.py`; Test `tests/test_libraries.py`
+
+**Interfaces:**
+- Consumes: `platform_paths.default_library_path`, `Config.library_*`.
+- Produces:
+  - `LocalTrack` moves to `collector/tracks.py` (re-exported from `collector.libraries`).
+  - `class LibraryError(Exception)` (user-facing message, with `.fix: str`).
+  - `class Library` (abstract): `id: str`, `name: str`, `subtitle: str`, `icon: str` (file in `static/icons/apps/`), `needs: Literal["file", "folders"]`, `help_text: str`, `recommended_player: str` (key in `exporters.players.PLAYERS`, Task 13). Methods `detect() -> Path | None`, `load(path: Path | None, folders: list[Path]) -> list[LocalTrack]` (raises `LibraryError`), `test(path, folders) -> str` ("Found 12,345 tracks").
+  - `LIBRARIES: dict[str, Library]` in tile order `strawberry, itunes, mediamonkey, folder`; `get_library(id) -> Library`.
+- `StrawberryLibrary.load` is v1 `load_library`. A missing file → `LibraryError("Strawberry's library file wasn't found at <path>.", fix="Open Strawberry once so it creates its library, or pick the file yourself.")`.
+
+- [ ] **Step 1: Failing tests:** v1 `test_url_to_path` moved; `test_strawberry_loads_fixture_db` (fixture DB created in `setUp` with the v1 `songs` columns, 2 rows, 1 `unavailable=1` → 1 track); `test_strawberry_missing_file_is_library_error`; `test_registry_order`.
+- [ ] **Step 2–4:** FAIL → implement → PASS (full suite).
+- [ ] **Step 5:** Commit `refactor(library): library interface, Strawberry reader`.
+
+### Task 10: iTunes / Apple Music library reader
+
+**Files:** Create `collector/libraries/itunes.py`; Test `tests/test_libraries.py`
+
+**Interfaces:**
+- Produces: `ItunesLibrary(Library)` with `id="itunes"`, `name="iTunes / Apple Music"`, `needs="file"`. `location_to_path(url: str) -> str` handles `file:///Users/a/Music/x%20y.m4a` → `/Users/a/Music/x y.m4a` and `file://localhost/C:/Users/a/Music/x%20y.m4a` → `C:/Users/a/Music/x y.m4a` (pure string work, same result on any OS). Reads with `plistlib.load`; skips tracks without `Location`, with `Track Type` = `"URL"`/`"Remote"`, or with `Podcast`/`Movie`/`TV Show` true. Duration from `Total Time` (ms). Artist falls back to `Album Artist`.
+- `help_text` explains how to get the XML on macOS (Music → Settings → Advanced → "Share Library XML with other applications", or File → Library → Export Library) and on Windows (iTunes → Edit → Preferences → Advanced → "Share iTunes Library XML with other applications").
+
+- [ ] **Step 1: Failing tests:** `test_location_mac`, `test_location_windows_localhost`, `test_loads_fixture_plist` (fixture built with `plistlib.dumps` in `setUp`: 3 tracks — one local file, one Apple Music stream with no `Location`, one podcast → 1 track with title/artist/album/duration), `test_bad_xml_is_library_error`.
+- [ ] **Step 2–4:** FAIL → implement → PASS.
+- [ ] **Step 5:** Commit `feat(library): iTunes / Apple Music library XML`.
+
+### Task 11: MediaMonkey library reader
+
+**Files:** Create `collector/libraries/mediamonkey.py`; Test `tests/test_libraries.py`
+
+**Interfaces:**
+- Produces: `MediaMonkeyLibrary(Library)` with `id="mediamonkey"`, `needs="file"`. `detect()` tries `%APPDATA%/MediaMonkey5/MM5.DB`, then `%APPDATA%/MediaMonkey/MM.DB`. `load` copies the DB to a temp folder (as Strawberry does), opens it with `sqlite3`, calls `con.create_collation("IUNICODE", casefold_compare)`, and reads `Songs` (`SongTitle`, `Artist`, `Album`, `SongLength` ms, `SongPath`, `IDMedia`). Paths stored without a drive letter (starting `:\`) get the drive from `Medias.DriveLetter` (A = 0 … Z = 25), joined on `IDMedia`.
+- The exact column names and the drive-letter rule are checked against a real MM5.DB in Task 1's spike (the user's or a fresh MediaMonkey install on Windows). Fix this task's interface from those notes before starting it.
+
+- [ ] **Step 1: Failing tests:** `test_loads_fixture_db` (DB built in `setUp` with the `Songs`/`Medias` columns above, a column declared `COLLATE IUNICODE`, 2 songs) → paths `C:\Music\a.mp3` and `D:\b.flac`; `test_query_with_iunicode_column_works`; `test_missing_db_is_library_error`.
+- [ ] **Step 2–4:** FAIL → implement → PASS.
+- [ ] **Step 5:** Commit `feat(library): MediaMonkey`.
+
+### Task 12: Music folder scan + tag readers
+
+**Files:** Create `collector/libraries/tags.py`, `collector/libraries/folder.py`; Test `tests/test_tags.py`, `tests/test_libraries.py`
+
+**Interfaces:**
+- Produces:
+  - `@dataclass Tags(title: str = "", artist: str = "", album: str = "", album_artist: str = "", duration: int = 0)`
+  - `tags.read_tags(path: Path) -> Tags` dispatching on file signature (not extension): ID3v2.2/2.3/2.4 (`TIT2`/`TPE1`/`TALB`/`TPE2`/`TLEN`, UTF-16 and Latin-1 frames, unsynchronisation) with ID3v1 fallback; MP3 duration from the Xing/Info header, else `TLEN`, else 0. FLAC `STREAMINFO` + `VORBIS_COMMENT`. MP4/M4A `moov/udta/meta/ilst` (`©nam`, `©ART`, `©alb`, `aART`) + `mvhd` duration. Ogg Vorbis/Opus comment header + last granule position. WMA/ASF Content Description + Extended Content Description (`WM/AlbumTitle`, `WM/AlbumArtist`) + File Properties duration. Unknown/broken → `Tags()`, never an exception.
+  - `FolderLibrary(Library)` with `id="folder"`, `name="Music folder"`, `subtitle="Winamp, VLC, Windows Media Player, others"`, `needs="folders"`. Walks the folders for `.mp3 .m4a .m4b .aac .alac .flac .ogg .oga .opus .wma .wav .aif .aiff`, skipping hidden folders. A track with no title gets one from the path: `Artist/Album/NN - Title.ext` or `Artist - Title.ext`. Cache in `DATA_DIR / "folder-index.json"` keyed by path → `[size, mtime_ns, tags]`; only changed files are read again.
+- Why no Winamp/WMP database readers: the spec's library section explains.
+
+- [ ] **Step 1: Failing tests** (fixtures are built byte-by-byte in the tests, a few hundred bytes each): `test_id3v24_utf8`, `test_id3v23_utf16`, `test_id3v1_fallback`, `test_flac_tags_and_duration` (sample rate 44100, 441000 samples → 10 s), `test_mp4_tags_and_duration`, `test_ogg_vorbis_comments`, `test_asf_title_author`, `test_garbage_file_returns_empty_tags`, `test_title_from_path` (`Radiohead/OK Computer/02 - Paranoid Android.flac` with no tags → title `Paranoid Android`, artist `Radiohead`, album `OK Computer`), `test_cache_skips_unchanged_files` (second `load` reads 0 files; touching one reads 1).
+- [ ] **Step 2–4:** FAIL → implement → PASS.
+- [ ] **Step 5:** Commit `feat(library): music folder scan with built-in tag readers`.
+
+---
+
+## Phase 4 — Exporters
+
+### Task 13: Playlist formats
+
+**Files:** Create `collector/exporters/__init__.py`, `collector/exporters/playlist_formats.py`, `collector/exporters/players.py`; Modify `collector/playlist.py` (keep `safe_filename`, remove `write_m3u8`); Test `tests/test_exporters.py`
 
 **Interfaces:**
 - Consumes: `LocalTrack`, `SourceTrack`, `Playlist`.
@@ -237,13 +320,15 @@ Commit after each source: `feat(sources): <Service>`.
   - `@dataclass ExportItem(local: LocalTrack, source: SourceTrack)`
   - `PLAYLIST_FORMATS: dict[str, PlaylistFormat]` keys `m3u8, m3u, pls, xspf, itunes_xml, wpl, csv, json`. `PlaylistFormat(key, label, ext, write: Callable[[str, list[ExportItem], Path, PathStyle], str])` — `write` returns the file text, the caller writes the file.
   - `export_playlist(playlist: Playlist, items: list[ExportItem], formats: list[str], folder: Path, style: PathStyle) -> list[Path]` — file name `safe_filename(playlist.name) + ext`. For `itunes_xml` the ext is `.xml`, for `m3u` `.m3u`.
+  - `players.PLAYERS: dict[str, Player]` with `Player(key, name, icon, platforms: set[str], recommended: str, also: list[str], steps: str)`, keys and values exactly as the spec's "Which format for which app" table: `itunes, apple_music, strawberry, vlc, mediamonkey, winamp, wmp, media_player, other`. `players.default_player(library_id: str, platform: str) -> str` (strawberry→strawberry, itunes→`apple_music` on darwin else `itunes`, mediamonkey→mediamonkey, folder→`other`).
+  - Paths in M3U/M3U8/PLS/WPL use the running OS's separators (`str(Path)`); tests pass a `PureWindowsPath`-style path string to check backslashes survive.
 - Rules: XSPF `<location>` is a `file://` URI (`Path.as_uri()` for absolute; percent-encoded relative path otherwise). iTunes XML via `plistlib` with `Location` as `file://` URI, `Track ID` ints from 1. WPL: `<?wpl version="1.0"?>`, `<smil><head><title>`, `<media src="…"/>`. CSV header `Title,Artist,Album,Duration,ISRC,Path,Source URL`. JSON: `{"format": "thecollector-playlist", "version": 1, "name", "source", "source_url", "tracks": [...]}`.
 
-- [ ] **Step 1: Failing tests:** `test_m3u8_matches_v1_output` (same text v1 wrote for the existing test data); one `test_<format>_parses_back` per format (XSPF/WPL with `xml.etree`, iTunes with `plistlib.loads`, CSV with `csv.DictReader`, JSON with `json.loads`, PLS: `NumberOfEntries=2`, `File1=`); `test_special_characters` (title `Tom & "Jerry", <Live>`, artist `Björk`, path `/music/a #1/b c.flac` round-trip exactly in every format); `test_relative_paths`; `test_unsafe_playlist_name` (`"AC/DC: Best?"` → file `ACDC Best.m3u8`).
+- [ ] **Step 1: Failing tests:** `test_m3u8_matches_v1_output` (same text v1 wrote for the existing test data); one `test_<format>_parses_back` per format (XSPF/WPL with `xml.etree`, iTunes with `plistlib.loads`, CSV with `csv.DictReader`, JSON with `json.loads`, PLS: `NumberOfEntries=2`, `File1=`); `test_special_characters` (title `Tom & "Jerry", <Live>`, artist `Björk`, path `/music/a #1/b c.flac` round-trip exactly in every format); `test_relative_paths`; `test_unsafe_playlist_name` (`"AC/DC: Best?"` → file `ACDC Best.m3u8`); `test_windows_paths_kept` (`C:\Music\a b.mp3` appears unchanged in M3U8/PLS/WPL and as `file:///C:/Music/a%20b.mp3` in XSPF/iTunes XML); `test_every_player_format_exists` (each `PLAYERS[*].recommended` and `also` is a `PLAYLIST_FORMATS` key); `test_default_player`.
 - [ ] **Step 2–4:** FAIL → implement → PASS.
 - [ ] **Step 5:** Commit `feat(export): playlist formats`.
 
-### Task 10: NextUp note for any source
+### Task 14: NextUp note for any source
 
 **Files:** Modify `collector/vault.py`; Test `tests/test_collector.py`
 
@@ -252,39 +337,43 @@ Commit after each source: `feat(sources): <Service>`.
 - Tests: existing note tests updated; `test_v1_spotify_note_still_merges` (v1 note text + same tracks → `added == 0`); `test_youtube_label` (line ends with `[YouTube Music](https://…)`).
 - [ ] Steps FAIL → implement → PASS → commit `feat(vault): service-neutral missing note`.
 
-### Task 11: Missing-track formats
+### Task 15: Missing-track formats
 
 **Files:** Create `collector/exporters/missing_formats.py`; Test `tests/test_exporters.py`
 
 **Interfaces:**
-- Produces: `MISSING_FORMATS: dict[str, MissingFormat]` keys `json, csv, md, txt`; `export_missing(playlist: Playlist, missing: list[SourceTrack], fmt: str, folder: Path, today: date | None = None) -> Path` → `<safe name> missing tracks.<ext>`. Markdown task lines reuse `vault.task_line(track, service)` (Task 10), so the Markdown export and the NextUp note use the same line format.
-- Tests: `test_md_is_checklist` (every track line starts with `- [ ] Get "`), `test_txt_one_line_per_track` (`"Radiohead - Creep"`), `test_csv_headers` (`Title,Artist,Album,Duration,ISRC,URL`), `test_json_shape` (keys `playlist, source, source_url, exported_at, tracks`), `test_special_characters` (same values as Task 9).
+- Produces: `MISSING_FORMATS: dict[str, MissingFormat]` keys `json, csv, md, txt`; `export_missing(playlist: Playlist, missing: list[SourceTrack], fmt: str, folder: Path, today: date | None = None) -> Path` → `<safe name> missing tracks.<ext>`. Markdown task lines reuse `vault.task_line(track, service)` (Task 14), so the Markdown export and the NextUp note use the same line format.
+- Tests: `test_md_is_checklist` (every track line starts with `- [ ] Get "`), `test_txt_one_line_per_track` (`"Radiohead - Creep"`), `test_csv_headers` (`Title,Artist,Album,Duration,ISRC,URL`), `test_json_shape` (keys `playlist, source, source_url, exported_at, tracks`), `test_special_characters` (same values as Task 13).
 - [ ] Steps FAIL → implement → PASS → commit `feat(export): missing-track formats`.
 
 ---
 
-## Phase 4 — Server API
+## Phase 5 — Server API
 
-### Task 12: Source and credential routes
+### Task 16: Library, source and credential routes
 
 **Files:** Modify `collector/web.py`; Test `tests/test_web.py` (start `serve()` on port 0 in a thread, call with `urllib`, fake sources via `REGISTRY` patching)
 
 **Interfaces (JSON over HTTP; all POSTs keep the same-origin + JSON content-type check):**
-- `GET /api/status` → `{version, nextup_enabled, export_dir, playlist_dir}`
+- `GET /api/status` → `{version, platform, nextup_enabled, export_dir, playlist_dir, library: {id, name, path, folders, configured: bool}}`
+- `GET /api/libraries` → `[{id, name, subtitle, icon, needs, help_text, detected_path}]`
+- `POST /api/library/test` `{id, path?, folders?}` → `{ok, message}` or `{ok: false, error, fix}` (never saves)
+- `POST /api/library` `{id, path?, folders?}` → writes `[library]` into `config.toml` (rewrite only that table, keep the rest of the file and its comments) → `{library}`
+- `GET /api/players` → `PLAYERS` as JSON plus `default` from `default_player(library, platform)`
 - `GET /api/sources` → `[{id, name, icon, help_url, help_text, link_example, limits, uses_oauth, fields:[{key,label,secret,help,placeholder,multiline}], values: public_view, status: {state, error, fix}}]`
 - `POST /api/sources/<id>/credentials` `{values}` → saves → `{status}`
 - `POST /api/sources/<id>/test` `{values?}` → tests `values` merged over stored creds **without saving** → `{ok: true, message}` or `{ok: false, error, fix}` (HTTP 200 both ways). On success with no `values`, `mark_ok`.
 - `GET /login/<id>` → OAuth redirect; `GET /callback` (Spotify) and `GET /callback/<id>` (others) → save tokens → redirect `/?connected=<id>`. Pending OAuth `state` is kept per source in `App`.
 - `POST /api/sources/<id>/disconnect` → clears tokens only.
-- Tests: `test_sources_never_leak_secrets` (response body doesn't contain the saved secret string), `test_test_does_not_save`, `test_cross_origin_post_refused` (Origin `http://evil.test` → 403), `test_unknown_source_404`.
-- [ ] FAIL → implement → PASS → commit `feat(api): sources and credentials`.
+- Tests: `test_library_save_keeps_other_config_lines`, `test_library_test_does_not_save`, `test_sources_never_leak_secrets` (response body doesn't contain the saved secret string), `test_test_does_not_save`, `test_cross_origin_post_refused` (Origin `http://evil.test` → 403), `test_unknown_source_404`.
+- [ ] FAIL → implement → PASS → commit `feat(api): library, sources and credentials`.
 
-### Task 13: Analyze, resolve, export routes
+### Task 17: Analyze, resolve, export routes
 
 **Files:** Modify `collector/web.py`; Test `tests/test_web.py`
 
 **Interfaces:**
-- `POST /api/analyze` `{source, url}` → v1 payload plus `playlist.source`, `playlist.service`. On `CredentialError`: `mark_invalid` and HTTP 401 `{error, fix, code: "credentials", source}`. If `sources.detect(url)` names another source: 400 `{error, code: "wrong_source", detected}`.
+- `POST /api/analyze` `{source, url}` → v1 payload plus `playlist.source`, `playlist.service`. Loads the library with the configured reader. On `LibraryError`: 400 `{error, fix, code: "library"}`. On `CredentialError`: `mark_invalid` and HTTP 401 `{error, fix, code: "credentials", source}`. If `sources.detect(url)` names another source: 400 `{error, code: "wrong_source", detected}`.
 - `POST /api/resolve` `{analysis_id, decisions}` → validates every close match is decided, saves choices, stores the result in the analysis → `{matched, missing}`.
 - `POST /api/export/playlist` `{analysis_id, formats: [...], path_style, folder?}` → `{files: [path, ...]}`. `folder` defaults to `cfg.export_dir`; `m3u8` with no folder given still goes to `cfg.playlist_dir` (v1 behaviour for Strawberry).
 - `POST /api/export/missing` `{analysis_id, format, nextup: bool}` → `{file, note_path, note_added, note_ticked, obsidian_url}`; `nextup` ignored when not enabled.
@@ -295,32 +384,33 @@ Commit after each source: `feat(sources): <Service>`.
 
 ---
 
-## Phase 5 — Frontend
+## Phase 6 — Frontend
 
-No JS test runner exists, so each task ends with a manual check in the browser pane (`python3 -m collector --no-browser`, open `http://127.0.0.1:8766`). Use a fake source registered when `COLLECTOR_FAKE_SOURCES=1` (add in Task 14: `collector/sources/fake.py`, returns fixed tracks, credential test passes when `token == "ok"`) so screens can be checked without real accounts.
+No JS test runner exists, so each task ends with a manual check in the browser pane (`python3 -m collector --no-browser`, open `http://127.0.0.1:8766`). Use a fake source registered when `COLLECTOR_FAKE_SOURCES=1` (add in Task 18: `collector/sources/fake.py`, returns fixed tracks, credential test passes when `token == "ok"`) so screens can be checked without real accounts.
 
-### Task 14: Screen shell, router, transitions
+### Task 18: Screen shell, router, transitions
 
 **Files:** Modify `static/index.html`, `static/style.css`; Create `static/js/main.js`, `static/js/router.js`, `static/js/api.js`, `static/js/state.js`, `collector/sources/fake.py`; Delete `static/app.js`
 
 **Interfaces:**
-- `router.js`: `register(name: string, {render(el, state), onEnter?(el, state)})`, `go(name: string, {direction: "forward"|"back"} = {direction: "forward"}) -> Promise<void>`, `back() -> Promise<void>` (keeps a history stack). Screens: `source, credentials, link, review, export, missing, done`. While a transition runs, new `go()` calls queue rather than overlap.
+- `router.js`: `register(name: string, {render(el, state), onEnter?(el, state)})`, `go(name: string, {direction: "forward"|"back"} = {direction: "forward"}) -> Promise<void>`, `back() -> Promise<void>` (keeps a history stack). Screens: `library, source, credentials, link, review, export, missing, done`. Start screen: `library` when `status.library.configured` is false, else `source`. While a transition runs, new `go()` calls queue rather than overlap.
 - `api.js`: `get(url)`, `post(url, body)`; throws `ApiError` with `.status`, `.code`, `.data`.
-- `state.js`: single object `{source, sourceInfo, link, analysis, decisions, exportResult, missingResult, returnTo}`.
+- `state.js`: single object `{library, source, sourceInfo, link, analysis, decisions, exportResult, missingResult, returnTo}`.
 - CSS: `.screen` absolutely stacked in `.stage`; classes `.enter-from-right`, `.enter-from-left`, `.exit-to-left`, `.exit-to-right`, `.active`, using the Global Constraints timing and a reduced-motion block. Step bar `<ol class="steps">` with `aria-current="step"`. After transition, focus the new screen's `h2` (`tabindex="-1"`).
 - [ ] **Check:** with placeholder screens, Next/Back slide in the right direction with a fade; DevTools "Emulate prefers-reduced-motion" → fade only; fast double-click doesn't stack two screens; Tab focus lands on the heading.
 - [ ] Commit `feat(ui): screen router with slide and fade`.
 
-### Task 15: Source tiles and icons
+### Task 19: Library and source tiles, icons
 
-**Files:** Create `static/js/screens/source.js`, `static/icons/services/{spotify,apple-music,youtube-music,tidal,qobuz,amazon-music,soundcloud}.svg`, `static/icons/services/SOURCES.md`
+**Files:** Create `static/js/screens/library.js`, `static/js/screens/source.js`, `static/icons/services/{spotify,apple-music,youtube-music,tidal,qobuz,amazon-music,soundcloud}.svg`, `static/icons/apps/{strawberry,itunes,apple-music,mediamonkey,vlc,winamp,wmp,media-player,folder}.svg`, `static/icons/services/SOURCES.md`
 
-- [ ] **Step 1:** Get each icon from the service's official brand/press kit (ask the user before downloading; record URL, date, and brand-guideline notes in `SOURCES.md`). Use the single-colour or full-colour mark as each guideline requires; don't recolour or crop.
+- [ ] **Step 1:** Get each service and app icon from its official brand/press kit or the app's own source/repo (ask the user before downloading; record URL, date, and brand-guideline notes in `SOURCES.md`). `folder.svg` is a plain folder glyph drawn for this app (ask the user before downloading; record URL, date, and brand-guideline notes in `SOURCES.md`). Use the single-colour or full-colour mark as each guideline requires; don't recolour or crop.
 - [ ] **Step 2:** `source.js` renders `GET /api/sources` as a grid of `<button class="tile">` elements (icon 48 px, name below, badge "Set up" for `needs_setup`, "Needs attention" for `invalid`). Keyboard: arrow keys move between tiles. Click → `state.source = id`; `ready` → `go("link")`, otherwise `go("credentials")`.
-- [ ] **Check:** 7 tiles in REGISTRY order, labels under icons, badges right for fake states, works in light and dark mode and at 375 px width.
-- [ ] Commit `feat(ui): source picker tiles`.
+- [ ] **Step 3:** `library.js`: tiles from `GET /api/libraries` (icon, name, subtitle). Picking one shows its `help_text`, a path field prefilled with `detected_path` (or a folder list with **Add folder** for `needs="folders"`), **Test** ("Found N tracks" or error + fix) and **Save & continue** → `go("source")`. Header shows "Library: <name> · Change" on every screen; **Change** → `go("library", {direction: "back"})`.
+- [ ] **Check:** 7 source tiles in REGISTRY order and 4 library tiles, labels under icons, badges right for fake states, works in light and dark mode and at 375 px width. First run (no `[library] type`) opens on the library screen; a `LibraryError` during Analyze lands on it with the message.
+- [ ] Commit `feat(ui): library and source picker tiles`.
 
-### Task 16: Credentials set-up and fix sub-steps
+### Task 20: Credentials set-up and fix sub-steps
 
 **Files:** Create `static/js/screens/credentials.js`
 
@@ -330,7 +420,7 @@ No JS test runner exists, so each task ends with a manual check in the browser p
 - [ ] **Check (fake source):** blank store → set-up screen; Test with `token=bad` shows error and fix; Test with `ok` shows ✓; Save → link screen; set the fake source to fail on analyze → lands on the Fix screen with the message, Save & try again returns to the link screen with the link still filled in.
 - [ ] Commit `feat(ui): credential set-up, fix and test`.
 
-### Task 17: Link and review screens
+### Task 21: Link and review screens
 
 **Files:** Create `static/js/screens/link.js`, `static/js/screens/review.js`
 
@@ -339,34 +429,45 @@ No JS test runner exists, so each task ends with a manual check in the browser p
 - [ ] **Check:** full fake run to review; remembered choices pre-selected; Continue disabled until all decided.
 - [ ] Commit `feat(ui): link and review screens`.
 
-### Task 18: Export, missing and done screens
+### Task 22: Export, missing and done screens
 
 **Files:** Create `static/js/screens/export.js`, `static/js/screens/missing.js`, `static/js/screens/done.js`
 
-- [ ] **Step 1:** `export.js`: checkbox per playlist format (labels + "opens in" hint from the spec table, M3U8 ticked), path-style radios, folder text field (default from status), **Export** and **Skip**. Remember the last selection in `localStorage`.
+- [ ] **Step 1:** `export.js`: "Which app will you open this in?" tiles from `GET /api/players` (only players whose `platforms` include `status.platform`, plus Other), preselected with `default` or the last pick from `localStorage`. Picking one ticks its `recommended` format and shows its `steps`. "Show all formats" reveals every format as a checkbox. Path-style radios, folder text field (default from status), **Export** and **Skip**.
 - [ ] **Step 2:** `missing.js`: count + preview of the first 5 missing tracks, radio cards JSON / CSV / Markdown / TXT (each with a one-line "good for" hint), "Also update my NextUp note" checkbox only when `nextup_enabled`, **Export** and **Skip**.
 - [ ] **Step 3:** `done.js`: list of written files with **Open folder** (`/api/reveal`), NextUp note summary + **Open in Obsidian**, **Start over** (`go("source")`, clears state except source).
-- [ ] **Check:** written files open in VLC (m3u8, pls, xspf), and the CSV opens in LibreOffice; the `.md` renders as a checklist in Obsidian.
+- [ ] **Check:** written files open in VLC (m3u8, pls, xspf), and the CSV opens in LibreOffice; the `.md` renders as a checklist in Obsidian. The player tiles show only players for this OS.
 - [ ] Commit `feat(ui): export and done screens`.
+
+### Task 23: Player import check (Linux, Windows, macOS)
+
+**Files:** Create `docs/compatibility.md`; Modify `collector/exporters/players.py` and the spec table only if a row fails
+
+- [ ] **Step 1:** Export one 3-track playlist (one title with `&` and `"`, one non-Latin artist, one path with spaces) in every format, on each OS, from that OS's own library type.
+- [ ] **Step 2:** Import each app's recommended format with the steps shown on screen, and note whether all 3 tracks load:
+  - Linux (here): Strawberry, VLC.
+  - Windows (user or a Windows VM): iTunes, MediaMonkey, Winamp, VLC, Windows Media Player (Legacy), Media Player (Windows 11).
+  - macOS (user or a Mac): Apple Music, VLC.
+- [ ] **Step 3:** Write the results table in `docs/compatibility.md` (app, version, OS, format, result, date). For any failure, switch that app's `recommended` to a format that passed, update the spec table, re-run `tests.test_exporters`.
+- [ ] **Step 4:** Commit `docs: player compatibility results`.
 
 ---
 
-## Phase 6 — Release
+## Phase 7 — Release
 
-### Task 19: Docs, version, final check
+### Task 24: Docs, version, final check
 
 **Files:** Modify `README.md`, `CHANGELOG.md`, `collector/__init__.py`, `static/index.html` (version in footer), `collector-launch.sh` (no change expected; verify)
 
-- [ ] **Step 1:** README: sources table with set-up links, the new flow, export formats, credentials file location, v1→v2 migration notes.
+- [ ] **Step 1:** README: install and run on Linux, Windows and macOS (`python -m collector`), library choices, sources table with set-up links, the new flow, "which format for which app" table (link `docs/compatibility.md`), credentials file location per OS, v1→v2 migration notes.
 - [ ] **Step 2:** CHANGELOG `## 2.0.0 — <date>`: Added / Changed / Removed (`/api/build`, `config.toml [spotify] client_id` now only used for migration).
 - [ ] **Step 3:** `__version__ = "2.0.0"`.
-- [ ] **Step 4:** Run `python3 -m unittest discover tests` → all pass. Run the app from the launcher with the real v1 data directory copied to a temp `XDG_DATA_HOME`. Spotify playlist end-to-end with the existing note: no duplicate tasks.
+- [ ] **Step 4:** Run `python3 -m unittest discover tests` → all pass (also on Windows and macOS if available). Run the app from the launcher with the real v1 data directory copied to a temp `XDG_DATA_HOME`. Spotify playlist end-to-end with the existing note: no duplicate tasks.
 - [ ] **Step 5:** Commit `release: v2.0.0` and tag `v2.0.0`.
 
 ---
 
-## Open questions (answers change Tasks 8, 15, scope)
+## Open questions (answers change Task 8)
 
 1. **Amazon Music:** its API is invite-only. Keep the tile (works only with approved access), or leave Amazon out of v2.0?
 2. **Apple Music signing:** pure-Python ES256 signer (no dependency, ~150 lines of crypto to maintain), or a field where the user pastes a developer token they made elsewhere (simpler, expires up to every 6 months)?
-3. **Strawberry:** v2 still matches only against a Strawberry library. If other people will use the app, do they need other local libraries (plain music folder scan, foobar2000, MusicBee)? That would be its own v2.x plan.
