@@ -1,0 +1,15 @@
+# Personal settings and keys (copy config.example.toml to start)
+config.toml
+.env
+.env.*
+*.p8
+*.pem
+*.key
+credentials.json
+token.json
+
+# Runtime output
+collector.log
+__pycache__/
+*.pyc
+.venv/

@@ -1,0 +1,25 @@
+# TheCollector configuration. Paths may start with ~.
+# Your own copy lives in config.toml (created from this file on first run, never committed).
+
+[spotify]
+# Client ID of your app at https://developer.spotify.com/dashboard
+# In that app's settings, add this Redirect URI: http://127.0.0.1:8766/callback
+# You can also set the SPOTIFY_CLIENT_ID environment variable instead.
+client_id = ""
+
+[library]
+strawberry_db = "~/.local/share/strawberry/strawberry/strawberry.db"
+# Where built playlists (.m3u8) are saved.
+playlist_dir = "~/Music/Playlists"
+
+[vault]
+# The vault path and name are read from NextUp's config.
+nextup_config = "~/dev/NextUp/config.toml"
+# Vault folder for "<Playlist> missing tracks" notes.
+notes_folder = "Entertainment/Missing Tracks"
+# NextUp area id put in each note's frontmatter.
+area = "music"
+
+[server]
+host = "127.0.0.1"
+port = 8766

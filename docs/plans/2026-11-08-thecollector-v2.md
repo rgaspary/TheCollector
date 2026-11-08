@@ -1,0 +1,372 @@
+# TheCollector v2.0 Implementation Plan
+
+Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Turn TheCollector into a multi-source, step-by-step app (v2.0.0) that imports playlists from seven streaming services, exports the matched playlist in eight formats, and exports missing tracks in four formats.
+
+**Architecture:** A `collector/sources/` package puts every service behind one `Source` interface. A `CredentialStore` keeps per-source secrets and their status, and `collector/exporters/` holds one small writer per format. `web.py` gets source/credential/export routes, and the frontend becomes ES modules with a tiny screen router that runs the slide-and-fade transitions.
+
+**Tech Stack:** Python 3.11+ standard library only (`urllib`, `json`, `xml.etree`, `plistlib`, `csv`, `hashlib`, `secrets`), `unittest`. Vanilla JS (ES modules) + CSS, no build step.
+
+**Spec:** `docs/specs/2026-11-08-thecollector-v2-design.md`
+
+## Global Constraints
+
+- No third-party Python packages. If a task seems to need one, stop and ask.
+- Version string `2.0.0` in `collector/__init__.py` as `__version__`.
+- Credentials file: `DATA_DIR / "credentials.json"`, mode `0o600`, atomic write (temp file + `os.replace`).
+- The API never returns a stored secret value. Secret fields come back as `{"set": true}`.
+- Every network call goes through `collector/http.py` (one place to fake in tests). Timeout 20 s, retry 429 up to 2 times honouring `Retry-After` (max 10 s).
+- Transition: 320 ms, `cubic-bezier(.2,.7,.2,1)`, `translateX(48px)` + opacity. Reduced motion: opacity only, 150 ms.
+- Keep `/callback` as the Spotify redirect path (already registered by the user).
+- Tests: `python3 -m unittest discover tests`. No test makes a real network call.
+- User-facing text: plain, short, no jargon (matches the v1 UI voice).
+
+## Review Focus
+
+1. **Existing v1 notes and choices:** notes with `[Spotify](url)` links and `choices.json` keyed by bare Spotify IDs must keep working (no duplicate tasks, remembered picks still applied). Tests in Tasks 5 and 10.
+2. **Credentials that go bad mid-flow** (token revoked between source pick and Analyze): `/api/analyze` must answer `{"code": "credentials"}` and the UI must land on the Fix screen, not a generic error. Tests in Tasks 4 and 13.
+3. **Track names with commas, quotes, `&`, `<`, non-Latin script, and file paths with spaces/`#`** in every export format. Tests in Tasks 9 and 11.
+4. **Playlist names that aren't safe file names** (`AC/DC: Best?`, empty, only dots): every writer uses `safe_filename`. Test in Task 9.
+5. **No NextUp installed** (missing `[vault]` or the NextUp config file): app starts, missing-tracks export works, NextUp toggle hidden. Tests in Tasks 2 and 13.
+
+---
+
+## File structure
+
+```
+collector/
+  __init__.py            + __version__
+  config.py              [vault] optional, [export] dir, Config.vault_* may be None
+  http.py                NEW  request_json(), HttpError
+  credentials.py         NEW  CredentialStore
+  tracks.py              NEW  SourceTrack (moved from matching.py), Playlist
+  sources/
+    __init__.py          NEW  REGISTRY, get_source()
+    base.py              NEW  Field, Source, SourceError, CredentialError
+    spotify.py           MOVED from collector/spotify.py, now a Source
+    youtube_music.py     NEW
+    soundcloud.py        NEW
+    tidal.py             NEW
+    apple_music.py       NEW  (+ es256.py)
+    es256.py             NEW  minimal ES256 JWT signer
+    qobuz.py             NEW
+    amazon_music.py      NEW
+  exporters/
+    __init__.py          NEW  PLAYLIST_FORMATS, MISSING_FORMATS
+    playlist_formats.py  NEW  m3u8/m3u/pls/xspf/itunes_xml/wpl/csv/json
+    missing_formats.py   NEW  json/csv/md/txt
+  matching.py            imports SourceTrack from tracks.py
+  playlist.py            safe_filename + PathStyle helpers (write_m3u8 moves to exporters)
+  vault.py               service label in links, accepts old [Spotify] lines
+  choices.py             keys "<source>:<id>", reads bare Spotify IDs
+  web.py                 new routes
+static/
+  index.html             screen containers, step bar, type="module"
+  style.css              screens, tiles, transitions
+  js/main.js api.js router.js state.js
+  js/screens/source.js credentials.js link.js review.js export.js missing.js done.js
+  icons/services/*.svg   official service icons + SOURCES.md
+tests/
+  test_collector.py      existing (updated imports)
+  test_credentials.py test_http.py test_sources_*.py test_exporters.py test_web.py
+  fixtures/<source>/*.json
+```
+
+---
+
+## Phase 0 — Preparation
+
+### Task 1: Repo, version, API spike
+
+**Files:**
+- Create: `.gitignore` (`collector.log`, `__pycache__/`), `CHANGELOG.md`, `docs/notes/2026-11-api-spike.md`, `tests/fixtures/<source>/` (one recorded response per endpoint)
+- Modify: `collector/__init__.py`
+
+- [ ] **Step 1:** `git init`, commit v1 as-is: `git commit -m "chore: v1.0 baseline"`.
+- [ ] **Step 2:** Add `__version__ = "2.0.0-dev"` to `collector/__init__.py`. Add `CHANGELOG.md` with an `## 2.0.0 (unreleased)` heading.
+- [ ] **Step 3:** For each of Apple Music, Qobuz, Amazon Music, SoundCloud, TIDAL, YouTube Music, use the user's test credentials (ask the user for them, never commit them) to call the endpoint in the spec table once with `curl`. Save each trimmed response as `tests/fixtures/<source>/playlist.json` (and page 2 where paging exists). Strip personal data.
+- [ ] **Step 4:** Write `docs/notes/2026-11-api-spike.md`: per source, the confirmed URL, auth header, paging field, and the JSON paths for title/artists/album/duration/ISRC/url. If an endpoint differs from the spec table, update the spec table. If Amazon access is refused, record that and keep Task 8 to "setup + clear refusal message".
+- [ ] **Step 5:** Commit: `chore: start v2.0, record API spike`.
+
+---
+
+## Phase 1 — Backend foundation
+
+### Task 2: Config — optional vault, export folder
+
+**Files:** Modify `collector/config.py`, `config.toml`; Test `tests/test_config.py`
+
+**Interfaces:**
+- Produces: `Config.vault_path: Path | None`, `Config.vault_name: str | None`, `Config.notes_folder: str | None`, `Config.export_dir: Path`, `Config.nextup_enabled -> bool` (property), `Config.legacy_spotify_client_id: str` (from `[spotify] client_id` or env `SPOTIFY_CLIENT_ID`). `Config.client_id` is removed.
+
+- [ ] **Step 1: Failing tests**
+
+```python
+def test_no_vault_section(self):      # write a temp config without [vault]
+    cfg = config.load(path)
+    self.assertFalse(cfg.nextup_enabled); self.assertIsNone(cfg.vault_path)
+def test_missing_nextup_file(self):   # [vault] nextup_config points to a missing file
+    self.assertFalse(config.load(path).nextup_enabled)
+def test_export_dir_default(self):
+    self.assertEqual(config.load(path).export_dir, Path.home() / "Music/TheCollector Exports")
+```
+
+- [ ] **Step 2:** Run `python3 -m unittest tests.test_config -v` → FAIL.
+- [ ] **Step 3:** Implement in `config.load`. Add `[export] dir` to `config.toml`.
+- [ ] **Step 4:** Run → PASS. Full suite still passes.
+- [ ] **Step 5:** Commit `feat(config): optional NextUp vault, export folder`.
+
+### Task 3: Track model + HTTP helper
+
+**Files:** Create `collector/tracks.py`, `collector/http.py`; Modify `collector/matching.py`, `collector/vault.py`, `tests/test_collector.py`; Test `tests/test_http.py`
+
+**Interfaces:**
+- Produces:
+  - `@dataclass SourceTrack(id: str, title: str, artists: list[str], album: str, duration: int, url: str, isrc: str = "")` with `.artist` property. `matching.SpotifyTrack = SourceTrack` kept as an alias for one release.
+  - `@dataclass Playlist(source: str, id: str, name: str, url: str, tracks: list[SourceTrack])`
+  - `http.request_json(method: str, url: str, *, headers: dict | None = None, form: dict | None = None, json_body: dict | None = None, basic_auth: tuple[str, str] | None = None) -> dict`
+  - `class HttpError(Exception)`: `.status: int`, `.body: str`, `.retry_after: int | None`
+  - Module-level `http.opener` (defaults to `urllib.request.urlopen`) that tests replace.
+
+- [ ] **Step 1: Failing tests** — `test_http.py`: `test_retries_429_then_succeeds` (fake opener raises 429 with `Retry-After: 0` then returns `{"ok":1}` → result `{"ok":1}`, 2 calls); `test_raises_http_error_with_status` (403 → `HttpError.status == 403`, `.body` holds the text); `test_basic_auth_header` (header equals `"Basic " + b64("id:secret")`).
+- [ ] **Step 2:** Run → FAIL.
+- [ ] **Step 3:** Implement. Move `SpotifyTrack` to `tracks.SourceTrack`, update imports in `matching.py`, `vault.py`, tests.
+- [ ] **Step 4:** Run full suite → PASS.
+- [ ] **Step 5:** Commit `refactor: SourceTrack model and shared HTTP helper`.
+
+### Task 4: Source interface, registry, credential store
+
+**Files:** Create `collector/sources/__init__.py`, `collector/sources/base.py`, `collector/credentials.py`; Test `tests/test_credentials.py`
+
+**Interfaces:**
+- Produces:
+  - `@dataclass Field(key: str, label: str, secret: bool = False, help: str = "", placeholder: str = "", multiline: bool = False)`
+  - `class SourceError(Exception)` (user-facing message); `class CredentialError(SourceError)` (with `.fix: str`, the how-to-fix text)
+  - `class Source` (abstract): attributes `id: str`, `name: str`, `icon: str` (file name in `static/icons/services/`), `fields: list[Field]`, `help_url: str`, `help_text: str`, `link_example: str`, `uses_oauth: bool = False`, `limits: str = ""`. Methods `parse_link(text: str) -> str` (raises `SourceError`), `matches_link(text: str) -> bool`, `test(creds: dict) -> str` (returns an OK message or raises `CredentialError`), `get_playlist(link: str, creds: dict) -> Playlist`. OAuth sources also `login_url(creds, redirect_uri) -> str`, `finish_login(creds, code, state, redirect_uri) -> dict` (returns the creds to save).
+  - `sources.REGISTRY: dict[str, Source]` in tile order: spotify, apple_music, youtube_music, tidal, qobuz, amazon_music, soundcloud. `sources.get_source(id) -> Source` (raises `KeyError`). `sources.detect(link) -> str | None`.
+  - `CredentialStore(path: Path = DATA_DIR / "credentials.json")`: `get(source_id) -> dict`, `save(source_id, values: dict) -> None` (merges; empty string for a secret key keeps the old value), `status(source: Source) -> dict` → `{"state": "ready"|"needs_setup"|"invalid", "error": str, "fix": str}`, `mark_invalid(source_id, error: str, fix: str)`, `mark_ok(source_id)`, `public_view(source: Source) -> dict` (field key → `{"value": str}` for non-secret, `{"set": bool}` for secret), `clear(source_id)`.
+  - `status()` is `needs_setup` when any required field is empty, or (for OAuth) no token stored.
+
+- [ ] **Step 1: Failing tests**
+
+```python
+def test_file_mode_is_600(self): store.save("tidal", {"client_id": "a", "client_secret": "b"}); self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+def test_blank_secret_keeps_old(self): store.save("tidal", {"client_secret": ""}); self.assertEqual(store.get("tidal")["client_secret"], "b")
+def test_public_view_hides_secrets(self): self.assertEqual(store.public_view(TIDAL)["client_secret"], {"set": True})
+def test_status_cycle(self): needs_setup → save → ready → mark_invalid("401", "Copy it again") → invalid with error/fix → mark_ok → ready
+def test_corrupt_file_is_empty_store(self): path.write_text("{"); self.assertEqual(CredentialStore(path).get("tidal"), {})
+```
+
+Use a fake `Source` subclass in the test for `TIDAL`.
+- [ ] **Step 2:** Run → FAIL. **Step 3:** Implement. **Step 4:** Run → PASS.
+- [ ] **Step 5:** Commit `feat: source interface and credential store`.
+
+### Task 5: Spotify as a Source + migration
+
+**Files:** Move `collector/spotify.py` → `collector/sources/spotify.py`; Modify `collector/choices.py`; Test `tests/test_sources_spotify.py`, `tests/test_collector.py`
+
+**Interfaces:**
+- Consumes: `Source`, `CredentialStore`, `http.request_json`, `Playlist`.
+- Produces: `SpotifySource(Source)` with `id="spotify"`, fields `[Field("client_id", "Client ID")]`, `uses_oauth=True`. Tokens live in the creds dict (`access_token`, `refresh_token`, `expires_at`). `migrate_v1(store: CredentialStore, cfg: Config) -> None` copies `cfg.legacy_spotify_client_id` and `DATA_DIR/"token.json"` into the store if the store has no Spotify entry. `Choices.get(source: str, track_id: str)` and `Choices.update(source: str, decisions: dict[str, str])` store `"<source>:<id>"` keys, and `get("spotify", x)` falls back to the bare key `x`.
+- `_to_track` also reads `external_ids.isrc`.
+- On refresh failure or 401 after retry, raise `CredentialError("Spotify sign-in expired.", fix="Click Connect to sign in again.")`.
+
+- [ ] **Step 1: Failing tests:** existing `test_parse_playlist_id` moved; `test_to_track_reads_isrc`; `test_get_playlist_pages` (fake opener serving `fixtures/spotify/page1.json`, `page2.json` → track count = sum); `test_refresh_failure_raises_credential_error`; `test_migrate_v1_copies_client_id_and_token`; `test_choices_reads_bare_v1_key`.
+- [ ] **Step 2–4:** FAIL → implement → PASS.
+- [ ] **Step 5:** Commit `refactor(spotify): Spotify as a Source, migrate v1 settings`.
+
+---
+
+## Phase 2 — New sources
+
+Each task follows the same steps. Tests replace `http.opener` and serve the Task 1 fixtures.
+
+**Shared test list per source** (`tests/test_sources_<id>.py`):
+- `test_parse_link_variants` — every link form in the spec table → expected ID; a link from another service raises `SourceError`.
+- `test_maps_fixture_to_tracks` — first track's `title`, `artists`, `album`, `duration`, `url` (and `isrc` where the service gives it) equal the fixture values.
+- `test_paging` — two fixture pages → combined track count.
+- `test_auth_refused_is_credential_error` — opener returns 401 → `CredentialError` with a non-empty `.fix`.
+- `test_not_found_is_source_error` — 404 → `SourceError` (not `CredentialError`) naming the service.
+- `test_test_returns_ok_message` — `test(creds)` against a fixture → string containing the service name.
+
+Commit after each source: `feat(sources): <Service>`.
+
+### Task 6: YouTube Music and SoundCloud
+
+**Files:** Create `collector/sources/youtube_music.py`, `collector/sources/soundcloud.py`; Test `tests/test_sources_youtube_music.py`, `tests/test_sources_soundcloud.py`
+
+**Interfaces:**
+- `YouTubeMusicSource`: fields `[Field("api_key", "API key", secret=True)]`. `test()` calls `playlistItems.list` on a known public playlist ID constant. Title parsing: `split_youtube_title(video_title: str, channel: str) -> tuple[str, list[str]]` — channel ending in `" - Topic"` → artist = channel minus suffix, title unchanged; otherwise split on the first `" - "`, `" – "` or `" — "`; strip `(Official Video)`, `(Official Audio)`, `[Official Music Video]`, `(Lyrics)`, `(Visualizer)`. Durations from `videos.list?part=contentDetails` (ISO 8601 `PT#M#S`) in batches of 50.
+- Extra tests: `test_split_topic_channel` (`("Creep", "Radiohead - Topic") → ("Creep", ["Radiohead"])`), `test_split_dash_title` (`("Radiohead - Creep (Official Video)", "Radiohead") → ("Creep", ["Radiohead"])`), `test_iso_duration` (`"PT3M59S" → 239`).
+- `SoundCloudSource`: fields `client_id`, `client_secret` (secret). Token via `POST https://secure.soundcloud.com/oauth/token` with `basic_auth`, `grant_type=client_credentials`. The token is cached in creds (`access_token`, `expires_at`) and only fetched again when expired. `on.soundcloud.com` short links are resolved with `/resolve`. Artist = `publisher_metadata.artist` or `user.username`.
+- Extra test: `test_token_is_reused_until_expiry` (two `get_playlist` calls → one token request).
+
+### Task 7: TIDAL and Qobuz
+
+**Files:** Create `collector/sources/tidal.py`, `collector/sources/qobuz.py`; Tests alike.
+
+**Interfaces:**
+- `TidalSource`: fields `client_id`, `client_secret` (secret), `country` (non-secret, default `"US"`, used as `countryCode`). Client-credentials token at `https://auth.tidal.com/v1/oauth2/token`, cached like SoundCloud. Follows `links.next` for paging. Durations are ISO 8601. Reuse `parse_iso_duration` from Task 6 (move it to `collector/sources/base.py`).
+- `QobuzSource`: fields `app_id`, `app_secret` (secret), `email`, `password` (secret). `test()` and the first `get_playlist` call `user/login`, store `user_auth_token` in creds and **blank out `password`** before saving. If the token is later refused and no password is stored → `CredentialError(fix="Enter your Qobuz password again to sign in.")`.
+- Extra test: `test_password_not_kept_after_login` (`store.get("qobuz")["password"] == ""` and token set).
+
+### Task 8: Apple Music and Amazon Music
+
+**Files:** Create `collector/sources/es256.py`, `collector/sources/apple_music.py`, `collector/sources/amazon_music.py`; Test `tests/test_es256.py`, source tests
+
+**Interfaces:**
+- `es256.sign_jwt(header: dict, payload: dict, pem_private_key: str) -> str` — parses a PKCS#8 P-256 key (minimal DER reader), signs with ECDSA P-256/SHA-256 using a deterministic RFC 6979 nonce, outputs raw `r||s` base64url. `es256.verify_jwt(token: str, public_xy: tuple[int, int]) -> bool` exists for the test only.
+  - Tests: `test_rfc6979_vector` (RFC 6979 §A.2.5 P-256/SHA-256 message "sample" → exact `r`, `s`), `test_sign_then_verify`, `test_rejects_non_p256_key`.
+  - **If the user prefers** (open question 2), replace this with a "paste a developer token" field and drop `es256.py`.
+- `AppleMusicSource`: fields `team_id`, `key_id`, `private_key` (secret, multiline, help: "Paste the contents of the AuthKey_XXXX.p8 file"), `storefront` (default `"us"`, read from the link when present). Developer token cached in creds for 30 days (`exp` = now + 30 d). Links with `pl.u-` and `pl.` both use the catalog endpoint. Paging via `next`. `isrc` from `attributes.isrc`.
+- `AmazonMusicSource`: fields `client_id`, `client_secret` (secret), `api_key` (secret); `uses_oauth=True` with Login with Amazon (`https://www.amazon.com/ap/oa`, token `https://api.amazon.com/auth/o2/token`), scope from the spike notes. `limits` text: "Amazon Music's API is invite-only. This only works if Amazon has approved your developer account." A 403 whose body mentions the security profile → `CredentialError(fix="Ask Amazon Music to enable your Security Profile, or use another source.")`.
+
+---
+
+## Phase 3 — Exporters
+
+### Task 9: Playlist formats
+
+**Files:** Create `collector/exporters/__init__.py`, `collector/exporters/playlist_formats.py`; Modify `collector/playlist.py` (keep `safe_filename`, remove `write_m3u8`); Test `tests/test_exporters.py`
+
+**Interfaces:**
+- Consumes: `LocalTrack`, `SourceTrack`, `Playlist`.
+- Produces:
+  - `PathStyle = Literal["absolute", "relative", "name"]`; `playlist.format_path(track_path: str, export_dir: Path, style: PathStyle) -> str` (relative uses `os.path.relpath`, forward slashes).
+  - `@dataclass ExportItem(local: LocalTrack, source: SourceTrack)`
+  - `PLAYLIST_FORMATS: dict[str, PlaylistFormat]` keys `m3u8, m3u, pls, xspf, itunes_xml, wpl, csv, json`. `PlaylistFormat(key, label, ext, write: Callable[[str, list[ExportItem], Path, PathStyle], str])` — `write` returns the file text, the caller writes the file.
+  - `export_playlist(playlist: Playlist, items: list[ExportItem], formats: list[str], folder: Path, style: PathStyle) -> list[Path]` — file name `safe_filename(playlist.name) + ext`. For `itunes_xml` the ext is `.xml`, for `m3u` `.m3u`.
+- Rules: XSPF `<location>` is a `file://` URI (`Path.as_uri()` for absolute; percent-encoded relative path otherwise). iTunes XML via `plistlib` with `Location` as `file://` URI, `Track ID` ints from 1. WPL: `<?wpl version="1.0"?>`, `<smil><head><title>`, `<media src="…"/>`. CSV header `Title,Artist,Album,Duration,ISRC,Path,Source URL`. JSON: `{"format": "thecollector-playlist", "version": 1, "name", "source", "source_url", "tracks": [...]}`.
+
+- [ ] **Step 1: Failing tests:** `test_m3u8_matches_v1_output` (same text v1 wrote for the existing test data); one `test_<format>_parses_back` per format (XSPF/WPL with `xml.etree`, iTunes with `plistlib.loads`, CSV with `csv.DictReader`, JSON with `json.loads`, PLS: `NumberOfEntries=2`, `File1=`); `test_special_characters` (title `Tom & "Jerry", <Live>`, artist `Björk`, path `/music/a #1/b c.flac` round-trip exactly in every format); `test_relative_paths`; `test_unsafe_playlist_name` (`"AC/DC: Best?"` → file `ACDC Best.m3u8`).
+- [ ] **Step 2–4:** FAIL → implement → PASS.
+- [ ] **Step 5:** Commit `feat(export): playlist formats`.
+
+### Task 10: NextUp note for any source
+
+**Files:** Modify `collector/vault.py`; Test `tests/test_collector.py`
+
+**Interfaces:**
+- Produces: `task_line(t: SourceTrack, service: str) -> str` (link text `[<service>](url)`); `write_missing_note(vault, folder, area, playlist: Playlist, service: str, missing, found, today=None) -> NoteResult`. Intro line: `Tracks from [the <service> playlist](<url>) that aren't in your library yet.` `_line_key` matches `\[[^\]]+\]\((https?://[^)]+)\)` at the end of the line, so old `[Spotify]` lines still match.
+- Tests: existing note tests updated; `test_v1_spotify_note_still_merges` (v1 note text + same tracks → `added == 0`); `test_youtube_label` (line ends with `[YouTube Music](https://…)`).
+- [ ] Steps FAIL → implement → PASS → commit `feat(vault): service-neutral missing note`.
+
+### Task 11: Missing-track formats
+
+**Files:** Create `collector/exporters/missing_formats.py`; Test `tests/test_exporters.py`
+
+**Interfaces:**
+- Produces: `MISSING_FORMATS: dict[str, MissingFormat]` keys `json, csv, md, txt`; `export_missing(playlist: Playlist, missing: list[SourceTrack], fmt: str, folder: Path, today: date | None = None) -> Path` → `<safe name> missing tracks.<ext>`. Markdown task lines reuse `vault.task_line(track, service)` (Task 10), so the Markdown export and the NextUp note use the same line format.
+- Tests: `test_md_is_checklist` (every track line starts with `- [ ] Get "`), `test_txt_one_line_per_track` (`"Radiohead - Creep"`), `test_csv_headers` (`Title,Artist,Album,Duration,ISRC,URL`), `test_json_shape` (keys `playlist, source, source_url, exported_at, tracks`), `test_special_characters` (same values as Task 9).
+- [ ] Steps FAIL → implement → PASS → commit `feat(export): missing-track formats`.
+
+---
+
+## Phase 4 — Server API
+
+### Task 12: Source and credential routes
+
+**Files:** Modify `collector/web.py`; Test `tests/test_web.py` (start `serve()` on port 0 in a thread, call with `urllib`, fake sources via `REGISTRY` patching)
+
+**Interfaces (JSON over HTTP; all POSTs keep the same-origin + JSON content-type check):**
+- `GET /api/status` → `{version, nextup_enabled, export_dir, playlist_dir}`
+- `GET /api/sources` → `[{id, name, icon, help_url, help_text, link_example, limits, uses_oauth, fields:[{key,label,secret,help,placeholder,multiline}], values: public_view, status: {state, error, fix}}]`
+- `POST /api/sources/<id>/credentials` `{values}` → saves → `{status}`
+- `POST /api/sources/<id>/test` `{values?}` → tests `values` merged over stored creds **without saving** → `{ok: true, message}` or `{ok: false, error, fix}` (HTTP 200 both ways). On success with no `values`, `mark_ok`.
+- `GET /login/<id>` → OAuth redirect; `GET /callback` (Spotify) and `GET /callback/<id>` (others) → save tokens → redirect `/?connected=<id>`. Pending OAuth `state` is kept per source in `App`.
+- `POST /api/sources/<id>/disconnect` → clears tokens only.
+- Tests: `test_sources_never_leak_secrets` (response body doesn't contain the saved secret string), `test_test_does_not_save`, `test_cross_origin_post_refused` (Origin `http://evil.test` → 403), `test_unknown_source_404`.
+- [ ] FAIL → implement → PASS → commit `feat(api): sources and credentials`.
+
+### Task 13: Analyze, resolve, export routes
+
+**Files:** Modify `collector/web.py`; Test `tests/test_web.py`
+
+**Interfaces:**
+- `POST /api/analyze` `{source, url}` → v1 payload plus `playlist.source`, `playlist.service`. On `CredentialError`: `mark_invalid` and HTTP 401 `{error, fix, code: "credentials", source}`. If `sources.detect(url)` names another source: 400 `{error, code: "wrong_source", detected}`.
+- `POST /api/resolve` `{analysis_id, decisions}` → validates every close match is decided, saves choices, stores the result in the analysis → `{matched, missing}`.
+- `POST /api/export/playlist` `{analysis_id, formats: [...], path_style, folder?}` → `{files: [path, ...]}`. `folder` defaults to `cfg.export_dir`; `m3u8` with no folder given still goes to `cfg.playlist_dir` (v1 behaviour for Strawberry).
+- `POST /api/export/missing` `{analysis_id, format, nextup: bool}` → `{file, note_path, note_added, note_ticked, obsidian_url}`; `nextup` ignored when not enabled.
+- `POST /api/reveal` `{path}` → opens the containing folder with `xdg-open` / `open` / `explorer` (by `sys.platform`). Only paths written in this server's lifetime are allowed (kept in `App.written: set[Path]`), else 403.
+- `/api/build` removed.
+- Tests: `test_analyze_credentials_error_shape`, `test_wrong_source_hint`, `test_resolve_requires_all_decisions`, `test_export_writes_selected_formats`, `test_reveal_refuses_unknown_path`.
+- [ ] FAIL → implement → PASS → commit `feat(api): analyze, resolve and export routes`.
+
+---
+
+## Phase 5 — Frontend
+
+No JS test runner exists, so each task ends with a manual check in the browser pane (`python3 -m collector --no-browser`, open `http://127.0.0.1:8766`). Use a fake source registered when `COLLECTOR_FAKE_SOURCES=1` (add in Task 14: `collector/sources/fake.py`, returns fixed tracks, credential test passes when `token == "ok"`) so screens can be checked without real accounts.
+
+### Task 14: Screen shell, router, transitions
+
+**Files:** Modify `static/index.html`, `static/style.css`; Create `static/js/main.js`, `static/js/router.js`, `static/js/api.js`, `static/js/state.js`, `collector/sources/fake.py`; Delete `static/app.js`
+
+**Interfaces:**
+- `router.js`: `register(name: string, {render(el, state), onEnter?(el, state)})`, `go(name: string, {direction: "forward"|"back"} = {direction: "forward"}) -> Promise<void>`, `back() -> Promise<void>` (keeps a history stack). Screens: `source, credentials, link, review, export, missing, done`. While a transition runs, new `go()` calls queue rather than overlap.
+- `api.js`: `get(url)`, `post(url, body)`; throws `ApiError` with `.status`, `.code`, `.data`.
+- `state.js`: single object `{source, sourceInfo, link, analysis, decisions, exportResult, missingResult, returnTo}`.
+- CSS: `.screen` absolutely stacked in `.stage`; classes `.enter-from-right`, `.enter-from-left`, `.exit-to-left`, `.exit-to-right`, `.active`, using the Global Constraints timing and a reduced-motion block. Step bar `<ol class="steps">` with `aria-current="step"`. After transition, focus the new screen's `h2` (`tabindex="-1"`).
+- [ ] **Check:** with placeholder screens, Next/Back slide in the right direction with a fade; DevTools "Emulate prefers-reduced-motion" → fade only; fast double-click doesn't stack two screens; Tab focus lands on the heading.
+- [ ] Commit `feat(ui): screen router with slide and fade`.
+
+### Task 15: Source tiles and icons
+
+**Files:** Create `static/js/screens/source.js`, `static/icons/services/{spotify,apple-music,youtube-music,tidal,qobuz,amazon-music,soundcloud}.svg`, `static/icons/services/SOURCES.md`
+
+- [ ] **Step 1:** Get each icon from the service's official brand/press kit (ask the user before downloading; record URL, date, and brand-guideline notes in `SOURCES.md`). Use the single-colour or full-colour mark as each guideline requires; don't recolour or crop.
+- [ ] **Step 2:** `source.js` renders `GET /api/sources` as a grid of `<button class="tile">` elements (icon 48 px, name below, badge "Set up" for `needs_setup`, "Needs attention" for `invalid`). Keyboard: arrow keys move between tiles. Click → `state.source = id`; `ready` → `go("link")`, otherwise `go("credentials")`.
+- [ ] **Check:** 7 tiles in REGISTRY order, labels under icons, badges right for fake states, works in light and dark mode and at 375 px width.
+- [ ] Commit `feat(ui): source picker tiles`.
+
+### Task 16: Credentials set-up and fix sub-steps
+
+**Files:** Create `static/js/screens/credentials.js`
+
+- [ ] **Step 1:** One screen with two modes from `sourceInfo.status.state`: `needs_setup` → heading "Set up <Service>"; `invalid` → heading "Fix <Service> connection" plus a red box with `status.error` and `status.fix`. Fields from `fields` (secret → `type=password`, placeholder "Saved" when `values[key].set`; multiline → `<textarea>`). Help text + "Where to get these" link (`help_url`). `limits` shown as a muted note.
+- [ ] **Step 2:** Buttons: **Test** (optional; calls `/test` with the typed values, shows a green "✓ <message>" or the red error + fix inline, never blocks), **Save & continue** (saves; for OAuth sources it then shows **Connect**, which opens `/login/<id>` in the browser and polls `/api/sources` every 2 s until `ready`). After success: `go(state.returnTo || "link")`.
+- [ ] **Step 3:** In `main.js`, any `ApiError` with `code === "credentials"` sets `state.returnTo` to the current screen, refreshes the source status, and calls `go("credentials", {direction: "back"})`.
+- [ ] **Check (fake source):** blank store → set-up screen; Test with `token=bad` shows error and fix; Test with `ok` shows ✓; Save → link screen; set the fake source to fail on analyze → lands on the Fix screen with the message, Save & try again returns to the link screen with the link still filled in.
+- [ ] Commit `feat(ui): credential set-up, fix and test`.
+
+### Task 17: Link and review screens
+
+**Files:** Create `static/js/screens/link.js`, `static/js/screens/review.js`
+
+- [ ] **Step 1:** `link.js`: source icon + name, input with `link_example` as placeholder, **Analyze** with "Analyzing…" state. `wrong_source` error → message with a **Switch to <Service>** button.
+- [ ] **Step 2:** `review.js`: port `renderResults`/`updateBuild` from v1 `app.js` (chips, close-match radios, bulk buttons, details lists). "Open in <Service>" link. **Continue** posts `/api/resolve`, then goes to `export`, or to `missing` when `matched == 0`, or to `done` when both are empty.
+- [ ] **Check:** full fake run to review; remembered choices pre-selected; Continue disabled until all decided.
+- [ ] Commit `feat(ui): link and review screens`.
+
+### Task 18: Export, missing and done screens
+
+**Files:** Create `static/js/screens/export.js`, `static/js/screens/missing.js`, `static/js/screens/done.js`
+
+- [ ] **Step 1:** `export.js`: checkbox per playlist format (labels + "opens in" hint from the spec table, M3U8 ticked), path-style radios, folder text field (default from status), **Export** and **Skip**. Remember the last selection in `localStorage`.
+- [ ] **Step 2:** `missing.js`: count + preview of the first 5 missing tracks, radio cards JSON / CSV / Markdown / TXT (each with a one-line "good for" hint), "Also update my NextUp note" checkbox only when `nextup_enabled`, **Export** and **Skip**.
+- [ ] **Step 3:** `done.js`: list of written files with **Open folder** (`/api/reveal`), NextUp note summary + **Open in Obsidian**, **Start over** (`go("source")`, clears state except source).
+- [ ] **Check:** written files open in VLC (m3u8, pls, xspf), and the CSV opens in LibreOffice; the `.md` renders as a checklist in Obsidian.
+- [ ] Commit `feat(ui): export and done screens`.
+
+---
+
+## Phase 6 — Release
+
+### Task 19: Docs, version, final check
+
+**Files:** Modify `README.md`, `CHANGELOG.md`, `collector/__init__.py`, `static/index.html` (version in footer), `collector-launch.sh` (no change expected; verify)
+
+- [ ] **Step 1:** README: sources table with set-up links, the new flow, export formats, credentials file location, v1→v2 migration notes.
+- [ ] **Step 2:** CHANGELOG `## 2.0.0 — <date>`: Added / Changed / Removed (`/api/build`, `config.toml [spotify] client_id` now only used for migration).
+- [ ] **Step 3:** `__version__ = "2.0.0"`.
+- [ ] **Step 4:** Run `python3 -m unittest discover tests` → all pass. Run the app from the launcher with the real v1 data directory copied to a temp `XDG_DATA_HOME`. Spotify playlist end-to-end with the existing note: no duplicate tasks.
+- [ ] **Step 5:** Commit `release: v2.0.0` and tag `v2.0.0`.
+
+---
+
+## Open questions (answers change Tasks 8, 15, scope)
+
+1. **Amazon Music:** its API is invite-only. Keep the tile (works only with approved access), or leave Amazon out of v2.0?
+2. **Apple Music signing:** pure-Python ES256 signer (no dependency, ~150 lines of crypto to maintain), or a field where the user pastes a developer token they made elsewhere (simpler, expires up to every 6 months)?
+3. **Strawberry:** v2 still matches only against a Strawberry library. If other people will use the app, do they need other local libraries (plain music folder scan, foobar2000, MusicBee)? That would be its own v2.x plan.

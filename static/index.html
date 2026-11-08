@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TheCollector</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/static/icons/icon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png">
+<link rel="icon" type="image/svg+xml" href="/static/icon.svg">
+<link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+<link rel="manifest" href="/static/manifest.webmanifest">
+<meta name="theme-color" content="#1f1e1b">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main>
+  <header>
+    <h1><img src="/static/icon.svg" alt="" class="logo">TheCollector</h1>
+    <p class="sub">Build a Spotify playlist from your own music. Anything you don't have goes to a missing-tracks list in Obsidian.</p>
+    <div id="account" class="account"></div>
+  </header>
+
+  <div id="error" class="error" hidden></div>
+  <section id="setup" class="card" hidden></section>
+
+  <form id="analyze" class="card" hidden>
+    <label for="url">Spotify playlist link</label>
+    <div class="row">
+      <input id="url" type="text" placeholder="https://open.spotify.com/playlist/…" autocomplete="off" required>
+      <button type="submit" class="primary">Analyze</button>
+    </div>
+  </form>
+
+  <section id="results" hidden></section>
+  <section id="done" class="card done" hidden></section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
