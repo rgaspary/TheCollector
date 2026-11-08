@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from .matching import SpotifyTrack
+from .tracks import SourceTrack
 from .playlist import safe_filename
 
 
@@ -19,11 +19,11 @@ def note_title(playlist_name: str) -> str:
     return f"{playlist_name} missing tracks"
 
 
-def track_key(t: SpotifyTrack) -> str:
+def track_key(t: SourceTrack) -> str:
     return t.url or f'"{t.title}" by {t.artist}'
 
 
-def task_line(t: SpotifyTrack) -> str:
+def task_line(t: SourceTrack) -> str:
     text = f'- [ ] Get "{_md(t.title)}" by {_md(t.artist)}'
     if t.album:
         text += f" ({_md(t.album)})"
@@ -61,7 +61,7 @@ def _ensure_frontmatter(lines: list[str], key: str, value: str) -> bool:
 
 
 def write_missing_note(vault: Path, folder: str, area: str, playlist_name: str, playlist_url: str,
-                       missing: list[SpotifyTrack], found: list[SpotifyTrack],
+                       missing: list[SourceTrack], found: list[SourceTrack],
                        today: dt.date | None = None) -> NoteResult:
     """Create or update the note.
 
