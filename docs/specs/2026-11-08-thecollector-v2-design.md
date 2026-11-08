@@ -6,7 +6,7 @@ Status: draft for review · 2026-11-08
 
 | # | Request | v2.0 answer |
 |---|---|---|
-| 1 | More sources | Apple Music, Qobuz, SoundCloud, TIDAL, YouTube Music, next to Spotify |
+| 1 | More sources | Apple Music, Qobuz, TIDAL, YouTube Music, next to Spotify |
 | 2 | Playlist export | M3U8, M3U, PLS, XSPF (the XML option), iTunes/Music XML, WPL, CSV, JSON |
 | 3 | Missing-tracks export for people without NextUp | User picks JSON, CSV, Markdown or TXT. The NextUp note becomes optional |
 | 4 | Step-by-step screens | One screen per step, sliding left to right with a fade |
@@ -64,7 +64,6 @@ Every source implements one interface (`collector/sources/base.py`). What each n
 | Spotify | `open.spotify.com/playlist/…`, `spotify:playlist:…` | Client ID, then **Connect** (browser sign-in, PKCE) | Web API `/playlists/{id}/items` | Dev-mode apps may only read playlists the user owns or follows |
 | Apple Music | No link: an **exported playlist file** (XML, or plain/Unicode text) | Nothing. No API key or developer account | Parses the file the user exported from the Music app (Mac) or iTunes (Windows): track name, artist, album, time, in playlist order | The playlist must be in the user's library first (**Add to Library** for someone else's playlist). Works for personal and shared playlists alike |
 | Qobuz | `open.qobuz.com/playlist/…`, `play.qobuz.com/playlist/…`, `qobuz.com/…/playlists/…/<id>` | App ID, App secret, email, password | `user/login` → user token (password is **not** stored, only the token); `playlist/get?extra=tracks` | App ID/secret come from Qobuz on request (api@qobuz.com) |
-| SoundCloud | `soundcloud.com/<user>/sets/<name>`, `on.soundcloud.com/…` | Client ID, Client secret | Client-credentials token (HTTP Basic), `/resolve?url=` then the playlist's tracks | Registering an app needs an Artist Pro plan. Token issuance is rate-limited (50/12 h), so the token is cached |
 | TIDAL | `tidal.com/(browse/)playlist/<uuid>`, `listen.tidal.com/playlist/<uuid>` | Client ID, Client secret | Client-credentials token; `openapi.tidal.com/v2/playlists/{id}/relationships/items?include=items` | Public playlists only in v2.0 |
 | YouTube Music | `music.youtube.com/playlist?list=…`, `youtube.com/playlist?list=…` | YouTube Data API v3 key | `playlistItems.list` + `videos.list` (durations) | Public/unlisted playlists only. Titles like "Artist - Song" and "Artist - Topic" channels are parsed into artist/title |
 
@@ -161,6 +160,14 @@ nextup_config = "~/dev/NextUp/config.toml"
 ```
 
 `[spotify] client_id` is read once for migration and then ignored if the store has a value.
+
+## Future features
+
+Planned for after v2.0, not built in this release:
+
+| Feature | Why later | What it needs |
+|---|---|---|
+| SoundCloud source | Registering a SoundCloud app needs an Artist Pro plan | Client ID + secret; client-credentials token (HTTP Basic, cached because tokens are rate-limited to 50 per 12 h); `/resolve?url=` for `soundcloud.com/<user>/sets/<name>` and `on.soundcloud.com/…` links. Fits the existing `Source` interface with no other changes |
 
 ## Out of scope for v2.0
 

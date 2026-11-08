@@ -2,7 +2,7 @@
 
 Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Turn TheCollector into a multi-source, step-by-step app (v2.0.0) that runs on Linux, Windows and macOS, imports playlists from six streaming services, and matches them against the user's own library (Strawberry, iTunes/Apple Music, MediaMonkey, or a music folder). It exports the matched playlist in the right format for the user's player, and exports missing tracks in four formats.
+**Goal:** Turn TheCollector into a multi-source, step-by-step app (v2.0.0) that runs on Linux, Windows and macOS, imports playlists from five streaming services, and matches them against the user's own library (Strawberry, iTunes/Apple Music, MediaMonkey, or a music folder). It exports the matched playlist in the right format for the user's player, and exports missing tracks in four formats.
 
 **Architecture:** A `collector/sources/` package puts every service behind one `Source` interface, and `collector/libraries/` does the same for local libraries (all produce `LocalTrack` lists). A `CredentialStore` keeps per-source secrets and their status, and `collector/exporters/` holds one small writer per format. `web.py` gets source/credential/export routes, and the frontend becomes ES modules with a tiny screen router that runs the slide-and-fade transitions.
 
@@ -42,7 +42,7 @@ Each feature has its own branch cut from `v2.0`. When a branch's tasks are done 
 | # | Branch | Tasks | Delivers |
 |---|---|---|---|
 | 1 | `feature/foundation` | 1–5 | Config (optional NextUp, per-OS paths), track model, HTTP helper, source interface, credential store, Spotify as a source |
-| 2 | `feature/streaming-sources` | 6–8 | YouTube Music, SoundCloud, TIDAL, Qobuz, Apple Music file import |
+| 2 | `feature/streaming-sources` | 6–8 | YouTube Music, TIDAL, Qobuz, Apple Music file import |
 | 3 | `feature/local-libraries` | 9–12 | Strawberry, iTunes / Apple Music, MediaMonkey, music folder readers |
 | 4 | `feature/playlist-export` | 13 | Playlist formats and the per-player format table |
 | 5 | `feature/missing-tracks-export` | 14–15 | Service-neutral NextUp note, JSON / CSV / Markdown / TXT export |
@@ -71,7 +71,6 @@ collector/
     base.py              NEW  Field, Source, SourceError, CredentialError
     spotify.py           MOVED from collector/spotify.py, now a Source
     youtube_music.py     NEW
-    soundcloud.py        NEW
     tidal.py             NEW
     apple_music.py       NEW  file import (no API)
     qobuz.py             NEW
@@ -122,7 +121,7 @@ tests/
 > Steps 3a–4b (research with real accounts and library files) are done at the start of `feature/streaming-sources`, the first branch that uses them. They need the user's keys and sample files.
 
 - [ ] **Step 3a:** Apple Music: get a 3-track playlist exported as XML, plain text and Unicode text from the Mac Music app and from iTunes for Windows (from the user, or a VM). Save trimmed copies to `tests/fixtures/apple_music/` (strip `Location` paths and personal data). Record the text-export column names, encodings and the `Time` unit. Check whether the Apple Music app for Windows can export a playlist; record the answer for the import screen's Windows note.
-- [ ] **Step 3:** For each of Qobuz, SoundCloud, TIDAL, YouTube Music, use the user's test credentials (ask the user for them, never commit them) to call the endpoint in the spec table once with `curl`. Save each trimmed response as `tests/fixtures/<source>/playlist.json` (and page 2 where paging exists). Strip personal data.
+- [ ] **Step 3:** For each of Qobuz, TIDAL, YouTube Music, use the user's test credentials (ask the user for them, never commit them) to call the endpoint in the spec table once with `curl`. Save each trimmed response as `tests/fixtures/<source>/playlist.json` (and page 2 where paging exists). Strip personal data.
 - [ ] **Step 4:** Write `docs/notes/2026-11-api-spike.md`: per source, the confirmed URL, auth header, paging field, and the JSON paths for title/artists/album/duration/ISRC/url. If an endpoint differs from the spec table, update the spec table.
 - [ ] **Step 4b:** Get a MediaMonkey 5 `MM5.DB` (from the user's Windows PC or a fresh install with 3 tracks added). Record the `Songs` and `Medias` columns and how drive letters are stored in the spike notes. Do the same for an iTunes `iTunes Library.xml` from Windows and a Music app `Library.xml` from macOS (3 tracks each). Don't commit personal libraries.
 - [ ] **Step 5:** Commit: `chore: start v2.0, record API spike`.
@@ -187,7 +186,7 @@ def test_v1_library_keys_still_read(self):  # [library] strawberry_db = "..." wi
   - `@dataclass Field(key: str, label: str, secret: bool = False, help: str = "", placeholder: str = "", multiline: bool = False)`
   - `class SourceError(Exception)` (user-facing message); `class CredentialError(SourceError)` (with `.fix: str`, the how-to-fix text)
   - `class Source` (abstract): attributes `id: str`, `name: str`, `icon: str` (file name in `static/icons/services/`), `fields: list[Field]`, `help_url: str`, `help_text: str`, `link_example: str`, `uses_oauth: bool = False`, `limits: str = ""`, `input: Literal["link", "file"] = "link"`, and for file sources `file_types: list[str]`, `intro: str`, `export_steps: dict[str, list[str]]` (keys `"darwin"`, `"win32"`; the screen shows `"darwin"` on Linux). Methods `parse_link(text: str) -> str` (raises `SourceError`), `matches_link(text: str) -> bool`, `parse_file(filename: str, data: bytes) -> list[Playlist]` (file sources only; raises `SourceError`), `test(creds: dict) -> str` (returns an OK message or raises `CredentialError`), `get_playlist(link: str, creds: dict) -> Playlist`. OAuth sources also `login_url(creds, redirect_uri) -> str`, `finish_login(creds, code, state, redirect_uri) -> dict` (returns the creds to save).
-  - `sources.REGISTRY: dict[str, Source]` in tile order: spotify, apple_music, youtube_music, tidal, qobuz, soundcloud. `sources.get_source(id) -> Source` (raises `KeyError`). `sources.detect(link) -> str | None`.
+  - `sources.REGISTRY: dict[str, Source]` in tile order: spotify, apple_music, youtube_music, tidal, qobuz. `sources.get_source(id) -> Source` (raises `KeyError`). `sources.detect(link) -> str | None`.
   - `CredentialStore(path: Path = DATA_DIR / "credentials.json")`: `get(source_id) -> dict`, `save(source_id, values: dict) -> None` (merges; empty string for a secret key keeps the old value), `status(source: Source) -> dict` → `{"state": "ready"|"needs_setup"|"invalid", "error": str, "fix": str}`, `mark_invalid(source_id, error: str, fix: str)`, `mark_ok(source_id)`, `public_view(source: Source) -> dict` (field key → `{"value": str}` for non-secret, `{"set": bool}` for secret), `clear(source_id)`.
   - `status()` is `needs_setup` when any required field is empty, or (for OAuth) no token stored. A source with no fields (Apple Music) is always `ready`.
 
@@ -235,24 +234,22 @@ Each task follows the same steps. Tests replace `http.opener` and serve the Task
 
 Commit after each source: `feat(sources): <Service>`.
 
-### Task 6: YouTube Music and SoundCloud
+### Task 6: YouTube Music
 
-**Files:** Create `collector/sources/youtube_music.py`, `collector/sources/soundcloud.py`; Test `tests/test_sources_youtube_music.py`, `tests/test_sources_soundcloud.py`
+**Files:** Create `collector/sources/youtube_music.py`; Modify `collector/sources/base.py` (add `parse_iso_duration`); Test `tests/test_sources_youtube_music.py`
 
 **Interfaces:**
-- `YouTubeMusicSource`: fields `[Field("api_key", "API key", secret=True)]`. `test()` calls `playlistItems.list` on a known public playlist ID constant. Title parsing: `split_youtube_title(video_title: str, channel: str) -> tuple[str, list[str]]` — channel ending in `" - Topic"` → artist = channel minus suffix, title unchanged; otherwise split on the first `" - "`, `" – "` or `" — "`; strip `(Official Video)`, `(Official Audio)`, `[Official Music Video]`, `(Lyrics)`, `(Visualizer)`. Durations from `videos.list?part=contentDetails` (ISO 8601 `PT#M#S`) in batches of 50.
+- `YouTubeMusicSource`: fields `[Field("api_key", "API key", secret=True)]`. `test()` calls `playlistItems.list` on a known public playlist ID constant. Title parsing: `split_youtube_title(video_title: str, channel: str) -> tuple[str, list[str]]` — channel ending in `" - Topic"` → artist = channel minus suffix, title unchanged; otherwise split on the first `" - "`, `" – "` or `" — "`; strip `(Official Video)`, `(Official Audio)`, `[Official Music Video]`, `(Lyrics)`, `(Visualizer)`. Durations from `videos.list?part=contentDetails` (ISO 8601 `PT#M#S`) in batches of 50, parsed by `base.parse_iso_duration(value: str) -> int` (seconds; 0 if unreadable).
 - Extra tests: `test_split_topic_channel` (`("Creep", "Radiohead - Topic") → ("Creep", ["Radiohead"])`), `test_split_dash_title` (`("Radiohead - Creep (Official Video)", "Radiohead") → ("Creep", ["Radiohead"])`), `test_iso_duration` (`"PT3M59S" → 239`).
-- `SoundCloudSource`: fields `client_id`, `client_secret` (secret). Token via `POST https://secure.soundcloud.com/oauth/token` with `basic_auth`, `grant_type=client_credentials`. The token is cached in creds (`access_token`, `expires_at`) and only fetched again when expired. `on.soundcloud.com` short links are resolved with `/resolve`. Artist = `publisher_metadata.artist` or `user.username`.
-- Extra test: `test_token_is_reused_until_expiry` (two `get_playlist` calls → one token request).
 
 ### Task 7: TIDAL and Qobuz
 
 **Files:** Create `collector/sources/tidal.py`, `collector/sources/qobuz.py`; Tests alike.
 
 **Interfaces:**
-- `TidalSource`: fields `client_id`, `client_secret` (secret), `country` (non-secret, default `"US"`, used as `countryCode`). Client-credentials token at `https://auth.tidal.com/v1/oauth2/token`, cached like SoundCloud. Follows `links.next` for paging. Durations are ISO 8601. Reuse `parse_iso_duration` from Task 6 (move it to `collector/sources/base.py`).
-- `QobuzSource`: fields `app_id`, `app_secret` (secret), `email`, `password` (secret). `test()` and the first `get_playlist` call `user/login`, store `user_auth_token` in creds and **blank out `password`** before saving. If the token is later refused and no password is stored → `CredentialError(fix="Enter your Qobuz password again to sign in.")`.
-- Extra test: `test_password_not_kept_after_login` (`store.get("qobuz")["password"] == ""` and token set).
+- `TidalSource`: fields `client_id`, `client_secret` (secret), `country` (non-secret, default `"US"`, used as `countryCode`). Client-credentials token at `https://auth.tidal.com/v1/oauth2/token` (HTTP Basic). The token is cached in creds (`access_token`, `expires_at`) and only fetched again when expired. Follows `links.next` for paging. Durations are ISO 8601. Durations use `base.parse_iso_duration` (Task 6).
+- `QobuzSource`: fields `app_id`, `app_secret` (secret), `email`, `password` (secret). `test()` and the first `get_playlist` call `user/login`, store `user_auth_token` in creds and drop `password` (the caller saves the token, then calls `CredentialStore.remove("qobuz", ["password"])`, since `save` never overwrites with a blank). If the token is later refused and no password is stored → `CredentialError(fix="Enter your Qobuz password again to sign in.")`.
+- Extra tests: `test_password_not_kept_after_login` (`"password" not in store.get("qobuz")` and token set); `test_token_is_reused_until_expiry` for TIDAL (two `get_playlist` calls → one token request).
 
 ### Task 8: Apple Music (file import)
 
@@ -428,12 +425,12 @@ No JS test runner exists, so each task ends with a manual check in the browser p
 
 ### Task 19: Library and source tiles, icons
 
-**Files:** Create `static/js/screens/library.js`, `static/js/screens/source.js`, `static/icons/services/{spotify,apple-music,youtube-music,tidal,qobuz,soundcloud}.svg`, `static/icons/apps/{strawberry,itunes,apple-music,mediamonkey,vlc,winamp,wmp,media-player,folder}.svg`, `static/icons/services/SOURCES.md`
+**Files:** Create `static/js/screens/library.js`, `static/js/screens/source.js`, `static/icons/services/{spotify,apple-music,youtube-music,tidal,qobuz}.svg`, `static/icons/apps/{strawberry,itunes,apple-music,mediamonkey,vlc,winamp,wmp,media-player,folder}.svg`, `static/icons/services/SOURCES.md`
 
 - [ ] **Step 1:** Get each service and app icon from its official brand/press kit or the app's own source/repo (ask the user before downloading; record URL, date, and brand-guideline notes in `SOURCES.md`). `folder.svg` is a plain folder glyph drawn for this app (ask the user before downloading; record URL, date, and brand-guideline notes in `SOURCES.md`). Use the single-colour or full-colour mark as each guideline requires; don't recolour or crop.
 - [ ] **Step 2:** `source.js` renders `GET /api/sources` as a grid of `<button class="tile">` elements (icon 48 px, name below, badge "Set up" for `needs_setup`, "Needs attention" for `invalid`). Keyboard: arrow keys move between tiles. Click → `state.source = id`; not `ready` → `go("credentials")`; `ready` → `go(input === "file" ? "import" : "link")`.
 - [ ] **Step 3:** `library.js`: tiles from `GET /api/libraries` (icon, name, subtitle). Picking one shows its `help_text`, a path field prefilled with `detected_path` (or a folder list with **Add folder** for `needs="folders"`), **Test** ("Found N tracks" or error + fix) and **Save & continue** → `go("source")`. Header shows "Library: <name> · Change" on every screen; **Change** → `go("library", {direction: "back"})`.
-- [ ] **Check:** 6 source tiles in REGISTRY order and 4 library tiles, labels under icons, badges right for fake states, works in light and dark mode and at 375 px width. First run (no `[library] type`) opens on the library screen; a `LibraryError` during Analyze lands on it with the message.
+- [ ] **Check:** 5 source tiles in REGISTRY order and 4 library tiles, labels under icons, badges right for fake states, works in light and dark mode and at 375 px width. First run (no `[library] type`) opens on the library screen; a `LibraryError` during Analyze lands on it with the message.
 - [ ] Commit `feat(ui): library and source picker tiles`.
 
 ### Task 20: Credentials set-up and fix sub-steps
@@ -495,6 +492,8 @@ No JS test runner exists, so each task ends with a manual check in the browser p
 ---
 
 ## Decisions log
+
+- 2026-11-08: SoundCloud moved to Future features (see the spec). Registering an app needs an Artist Pro plan.
 
 - 2026-11-08: Apple Music uses file import (exported XML or text), so no API, developer account or token signing is needed.
 - 2026-11-08: Amazon Music removed from v2.0. It has no playlist export and its API is invite-only, so users would need a third-party (sometimes paid) export tool.
