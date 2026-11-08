@@ -6,7 +6,7 @@ Status: draft for review · 2026-11-08
 
 | # | Request | v2.0 answer |
 |---|---|---|
-| 1 | More sources | Apple Music, Qobuz, Amazon Music, SoundCloud, TIDAL, YouTube Music, next to Spotify |
+| 1 | More sources | Apple Music, Qobuz, SoundCloud, TIDAL, YouTube Music, next to Spotify |
 | 2 | Playlist export | M3U8, M3U, PLS, XSPF (the XML option), iTunes/Music XML, WPL, CSV, JSON |
 | 3 | Missing-tracks export for people without NextUp | User picks JSON, CSV, Markdown or TXT. The NextUp note becomes optional |
 | 4 | Step-by-step screens | One screen per step, sliding left to right with a fade |
@@ -62,9 +62,8 @@ Every source implements one interface (`collector/sources/base.py`). What each n
 | Source | Link it accepts | What the user provides | How the app reads the playlist | Limits to tell the user |
 |---|---|---|---|---|
 | Spotify | `open.spotify.com/playlist/…`, `spotify:playlist:…` | Client ID, then **Connect** (browser sign-in, PKCE) | Web API `/playlists/{id}/items` | Dev-mode apps may only read playlists the user owns or follows |
-| Apple Music | `music.apple.com/…/playlist/…/pl.…` | Team ID, Key ID, MusicKit private key (`.p8`) | App signs an ES256 developer token; catalog API `/v1/catalog/{storefront}/playlists/{id}` | Needs a paid Apple Developer account. Shared/public playlists only in v2.0 (personal library needs a MusicKit JS sign-in, deferred) |
+| Apple Music | No link: an **exported playlist file** (XML, or plain/Unicode text) | Nothing. No API key or developer account | Parses the file the user exported from the Music app (Mac) or iTunes (Windows): track name, artist, album, time, in playlist order | The playlist must be in the user's library first (**Add to Library** for someone else's playlist). Works for personal and shared playlists alike |
 | Qobuz | `open.qobuz.com/playlist/…`, `play.qobuz.com/playlist/…`, `qobuz.com/…/playlists/…/<id>` | App ID, App secret, email, password | `user/login` → user token (password is **not** stored, only the token); `playlist/get?extra=tracks` | App ID/secret come from Qobuz on request (api@qobuz.com) |
-| Amazon Music | `music.amazon.*/playlists/…`, `…/user-playlists/…` | Security Profile client ID + secret, API key, then **Connect** (Login with Amazon) | Amazon Music Web API v2 (`api.music.amazon.com`) | API is closed beta: only works for developers Amazon has approved. The tile says so |
 | SoundCloud | `soundcloud.com/<user>/sets/<name>`, `on.soundcloud.com/…` | Client ID, Client secret | Client-credentials token (HTTP Basic), `/resolve?url=` then the playlist's tracks | Registering an app needs an Artist Pro plan. Token issuance is rate-limited (50/12 h), so the token is cached |
 | TIDAL | `tidal.com/(browse/)playlist/<uuid>`, `listen.tidal.com/playlist/<uuid>` | Client ID, Client secret | Client-credentials token; `openapi.tidal.com/v2/playlists/{id}/relationships/items?include=items` | Public playlists only in v2.0 |
 | YouTube Music | `music.youtube.com/playlist?list=…`, `youtube.com/playlist?list=…` | YouTube Data API v3 key | `playlistItems.list` + `videos.list` (durations) | Public/unlisted playlists only. Titles like "Artist - Song" and "Artist - Topic" channels are parsed into artist/title |
@@ -87,14 +86,22 @@ The Task 1 spike confirms each endpoint before any source is built; the plan upd
 1 Source ──► 1a Set up credentials ─┐
    │         1b Fix credentials ────┤ (only when needed)
    ▼                                ▼
-2 Playlist link ──► 3 Review matches ──► 4 Export playlist ──► 5 Missing tracks ──► 6 Done
+2 Playlist link ───────────────────────┐
+2′ Import playlist file (Apple Music) ─┴──► 3 Review matches ──► 4 Export playlist ──► 5 Missing tracks ──► 6 Done
 ```
 
 - **0 Library:** tiles for Strawberry, iTunes / Apple Music, MediaMonkey, Music folder (subtitle "Winamp, VLC, Windows Media Player, others"). The app fills in the detected path; **Test** reports "Found 12,345 tracks" or what's wrong. **Save & continue**. Shown once; the header shows the library name with a **Change** link.
-- **1 Source:** grid of tiles, each with the service's official icon and its name underneath. A small badge on the tile shows "Set up" or "Needs attention".
-- **1a Set up:** "Where to get these" help with a link to the service's developer page, the fields, an optional **Test** button that reports OK or the exact error, and **Save & continue**. OAuth sources (Spotify, Amazon) add a **Connect** button after the fields are saved.
+- **1 Source:** grid of tiles, each with the service's official icon and its name underneath. A small badge on the tile shows "Set up" or "Needs attention". Apple Music needs no set-up and goes straight to screen 2′.
+- **1a Set up:** "Where to get these" help with a link to the service's developer page, the fields, an optional **Test** button that reports OK or the exact error, and **Save & continue**. Spotify adds a **Connect** button (browser sign-in) after the fields are saved.
 - **1b Fix:** like 1a, plus a red box saying what went wrong (the service's message) and how to fix it (per-source text, e.g. "Your TIDAL client secret was rejected. Copy it again from developer.tidal.com → Dashboard"). Fields come prefilled, secrets show as saved. **Save & try again** goes back to where the user was (source pick or analyze).
 - **2 Link:** paste field with the chosen service's example link, **Analyze**, progress state. A link from the wrong service gets a hint ("That's a Spotify link — switch source?").
+- **2′ Import file (Apple Music only, replaces 2):**
+  - One-line intro: "No API key needed. Export the playlist from Apple Music, then drop the file here."
+  - Numbered steps, Mac / Windows tabs, the tab for the running OS selected first:
+    - **Mac (Music app):** 1. Open Music. 2. If the playlist isn't yours, open it and click **Add** (+) so it's in your library. 3. Click the playlist in the sidebar. 4. Choose **File → Library → Export Playlist…** 5. Set **Format** to **XML** and click **Save**. 6. Drop the saved file below.
+    - **Windows (iTunes):** 1. Open iTunes. 2. If the playlist isn't yours, add it to your library. 3. Click the playlist under **Playlists**. 4. Choose **File → Library → Export Playlist…** 5. Set **Save as type** to **XML Files** and click **Save**. 6. Drop the saved file below. Plus a note that the newer Apple Music app for Windows has no playlist export (confirmed in plan Task 1), so iTunes for Windows is needed for this step.
+  - A drop zone with a **Choose file…** button (accepts `.xml`, `.txt`). After the file is read: "**<Playlist name>** · N tracks" with the first 5 tracks as a preview, **Use a different file**, and **Continue**, which runs the analysis.
+  - Errors in plain words: an M3U/M3U8 file → "This file only lists downloaded songs. Export again with Format set to XML."; an XML with several playlists (a whole-library export) → pick one from a list; unreadable file → "This doesn't look like a playlist exported from Apple Music or iTunes."
 - **3 Review:** today's results card (chips, close-match choices, bulk buttons). **Continue** is enabled once every close match is decided.
 - **4 Export playlist:** "Which app will you open this in?" tiles (pre-selected from the library choice: Strawberry → Strawberry, iTunes/Apple Music → iTunes or Apple Music by OS, MediaMonkey → MediaMonkey, folder → last pick), import steps for that app, "Show all formats" with checkboxes, a path-style choice (absolute / relative to the export folder / file name only), the folder, and **Export**. Skippable when nothing matched.
 - **5 Missing tracks:** pick one of JSON, CSV, Markdown, TXT, plus an "Also update my NextUp note" toggle (shown only when NextUp is configured). Skipped automatically when nothing is missing.
@@ -157,8 +164,10 @@ nextup_config = "~/dev/NextUp/config.toml"
 
 ## Out of scope for v2.0
 
-- Reading private/library playlists for Apple Music, TIDAL, YouTube Music (needs per-user OAuth flows).
+- Reading Apple Music playlists from a link through Apple's API (needs a paid developer account; the file import covers it).
+- Reading private/library playlists for TIDAL and YouTube Music (needs per-user OAuth flows).
 - Reading Winamp's or Windows Media Player's own library databases (the folder scan covers them).
 - Adding the playlist into the player automatically (the user imports the file).
 - Packaged installers for Windows/macOS (people run it with Python 3.11+ in v2.0).
 - Writing playlists back to streaming services.
+- Amazon Music. It has no playlist export and its API is invite-only; the only practical routes need a third-party tool, some of them paid. Removed 2026-11-08.

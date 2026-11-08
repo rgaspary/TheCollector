@@ -2,7 +2,7 @@
 
 Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Turn TheCollector into a multi-source, step-by-step app (v2.0.0) that runs on Linux, Windows and macOS, imports playlists from seven streaming services, and matches them against the user's own library (Strawberry, iTunes/Apple Music, MediaMonkey, or a music folder). It exports the matched playlist in the right format for the user's player, and exports missing tracks in four formats.
+**Goal:** Turn TheCollector into a multi-source, step-by-step app (v2.0.0) that runs on Linux, Windows and macOS, imports playlists from six streaming services, and matches them against the user's own library (Strawberry, iTunes/Apple Music, MediaMonkey, or a music folder). It exports the matched playlist in the right format for the user's player, and exports missing tracks in four formats.
 
 **Architecture:** A `collector/sources/` package puts every service behind one `Source` interface, and `collector/libraries/` does the same for local libraries (all produce `LocalTrack` lists). A `CredentialStore` keeps per-source secrets and their status, and `collector/exporters/` holds one small writer per format. `web.py` gets source/credential/export routes, and the frontend becomes ES modules with a tiny screen router that runs the slide-and-fade transitions.
 
@@ -44,6 +44,7 @@ collector/
   platform_paths.py      NEW  per-OS data folder and default library paths
   http.py                NEW  request_json(), HttpError
   credentials.py         NEW  CredentialStore
+  itunes_xml.py          NEW  shared reader for Music/iTunes XML + text exports
   tracks.py              NEW  SourceTrack (moved from matching.py), Playlist
   sources/
     __init__.py          NEW  REGISTRY, get_source()
@@ -52,10 +53,8 @@ collector/
     youtube_music.py     NEW
     soundcloud.py        NEW
     tidal.py             NEW
-    apple_music.py       NEW  (+ es256.py)
-    es256.py             NEW  minimal ES256 JWT signer
+    apple_music.py       NEW  file import (no API)
     qobuz.py             NEW
-    amazon_music.py      NEW
   libraries/
     __init__.py          NEW  LIBRARIES, get_library()
     base.py              NEW  Library, LibraryError
@@ -78,7 +77,7 @@ static/
   index.html             screen containers, step bar, type="module"
   style.css              screens, tiles, transitions
   js/main.js api.js router.js state.js
-  js/screens/library.js source.js credentials.js link.js review.js export.js missing.js done.js
+  js/screens/library.js source.js credentials.js link.js import.js review.js export.js missing.js done.js
   icons/services/*.svg   official service icons + SOURCES.md
   icons/apps/*.svg       official player/library app icons (same SOURCES.md rules)
 tests/
@@ -100,8 +99,9 @@ tests/
 
 - [x] **Step 1:** Git repo and public GitHub repo exist (done 2026-11-08: `rgaspary/TheCollector`, MIT). Work on the `v2.0` branch; merge into `main` at release.
 - [ ] **Step 2:** Add `__version__ = "2.0.0-dev"` to `collector/__init__.py`. Add `CHANGELOG.md` with an `## 2.0.0 (unreleased)` heading.
-- [ ] **Step 3:** For each of Apple Music, Qobuz, Amazon Music, SoundCloud, TIDAL, YouTube Music, use the user's test credentials (ask the user for them, never commit them) to call the endpoint in the spec table once with `curl`. Save each trimmed response as `tests/fixtures/<source>/playlist.json` (and page 2 where paging exists). Strip personal data.
-- [ ] **Step 4:** Write `docs/notes/2026-11-api-spike.md`: per source, the confirmed URL, auth header, paging field, and the JSON paths for title/artists/album/duration/ISRC/url. If an endpoint differs from the spec table, update the spec table. If Amazon access is refused, record that and keep Task 8 to "setup + clear refusal message".
+- [ ] **Step 3a:** Apple Music: get a 3-track playlist exported as XML, plain text and Unicode text from the Mac Music app and from iTunes for Windows (from the user, or a VM). Save trimmed copies to `tests/fixtures/apple_music/` (strip `Location` paths and personal data). Record the text-export column names, encodings and the `Time` unit. Check whether the Apple Music app for Windows can export a playlist; record the answer for the import screen's Windows note.
+- [ ] **Step 3:** For each of Qobuz, SoundCloud, TIDAL, YouTube Music, use the user's test credentials (ask the user for them, never commit them) to call the endpoint in the spec table once with `curl`. Save each trimmed response as `tests/fixtures/<source>/playlist.json` (and page 2 where paging exists). Strip personal data.
+- [ ] **Step 4:** Write `docs/notes/2026-11-api-spike.md`: per source, the confirmed URL, auth header, paging field, and the JSON paths for title/artists/album/duration/ISRC/url. If an endpoint differs from the spec table, update the spec table.
 - [ ] **Step 4b:** Get a MediaMonkey 5 `MM5.DB` (from the user's Windows PC or a fresh install with 3 tracks added). Record the `Songs` and `Medias` columns and how drive letters are stored in the spike notes. Do the same for an iTunes `iTunes Library.xml` from Windows and a Music app `Library.xml` from macOS (3 tracks each). Don't commit personal libraries.
 - [ ] **Step 5:** Commit: `chore: start v2.0, record API spike`.
 
@@ -164,10 +164,10 @@ def test_v1_library_keys_still_read(self):  # [library] strawberry_db = "..." wi
 - Produces:
   - `@dataclass Field(key: str, label: str, secret: bool = False, help: str = "", placeholder: str = "", multiline: bool = False)`
   - `class SourceError(Exception)` (user-facing message); `class CredentialError(SourceError)` (with `.fix: str`, the how-to-fix text)
-  - `class Source` (abstract): attributes `id: str`, `name: str`, `icon: str` (file name in `static/icons/services/`), `fields: list[Field]`, `help_url: str`, `help_text: str`, `link_example: str`, `uses_oauth: bool = False`, `limits: str = ""`. Methods `parse_link(text: str) -> str` (raises `SourceError`), `matches_link(text: str) -> bool`, `test(creds: dict) -> str` (returns an OK message or raises `CredentialError`), `get_playlist(link: str, creds: dict) -> Playlist`. OAuth sources also `login_url(creds, redirect_uri) -> str`, `finish_login(creds, code, state, redirect_uri) -> dict` (returns the creds to save).
-  - `sources.REGISTRY: dict[str, Source]` in tile order: spotify, apple_music, youtube_music, tidal, qobuz, amazon_music, soundcloud. `sources.get_source(id) -> Source` (raises `KeyError`). `sources.detect(link) -> str | None`.
+  - `class Source` (abstract): attributes `id: str`, `name: str`, `icon: str` (file name in `static/icons/services/`), `fields: list[Field]`, `help_url: str`, `help_text: str`, `link_example: str`, `uses_oauth: bool = False`, `limits: str = ""`, `input: Literal["link", "file"] = "link"`, and for file sources `file_types: list[str]`, `intro: str`, `export_steps: dict[str, list[str]]` (keys `"darwin"`, `"win32"`; the screen shows `"darwin"` on Linux). Methods `parse_link(text: str) -> str` (raises `SourceError`), `matches_link(text: str) -> bool`, `parse_file(filename: str, data: bytes) -> list[Playlist]` (file sources only; raises `SourceError`), `test(creds: dict) -> str` (returns an OK message or raises `CredentialError`), `get_playlist(link: str, creds: dict) -> Playlist`. OAuth sources also `login_url(creds, redirect_uri) -> str`, `finish_login(creds, code, state, redirect_uri) -> dict` (returns the creds to save).
+  - `sources.REGISTRY: dict[str, Source]` in tile order: spotify, apple_music, youtube_music, tidal, qobuz, soundcloud. `sources.get_source(id) -> Source` (raises `KeyError`). `sources.detect(link) -> str | None`.
   - `CredentialStore(path: Path = DATA_DIR / "credentials.json")`: `get(source_id) -> dict`, `save(source_id, values: dict) -> None` (merges; empty string for a secret key keeps the old value), `status(source: Source) -> dict` → `{"state": "ready"|"needs_setup"|"invalid", "error": str, "fix": str}`, `mark_invalid(source_id, error: str, fix: str)`, `mark_ok(source_id)`, `public_view(source: Source) -> dict` (field key → `{"value": str}` for non-secret, `{"set": bool}` for secret), `clear(source_id)`.
-  - `status()` is `needs_setup` when any required field is empty, or (for OAuth) no token stored.
+  - `status()` is `needs_setup` when any required field is empty, or (for OAuth) no token stored. A source with no fields (Apple Music) is always `ready`.
 
 - [ ] **Step 1: Failing tests**
 
@@ -232,16 +232,18 @@ Commit after each source: `feat(sources): <Service>`.
 - `QobuzSource`: fields `app_id`, `app_secret` (secret), `email`, `password` (secret). `test()` and the first `get_playlist` call `user/login`, store `user_auth_token` in creds and **blank out `password`** before saving. If the token is later refused and no password is stored → `CredentialError(fix="Enter your Qobuz password again to sign in.")`.
 - Extra test: `test_password_not_kept_after_login` (`store.get("qobuz")["password"] == ""` and token set).
 
-### Task 8: Apple Music and Amazon Music
+### Task 8: Apple Music (file import)
 
-**Files:** Create `collector/sources/es256.py`, `collector/sources/apple_music.py`, `collector/sources/amazon_music.py`; Test `tests/test_es256.py`, source tests
+**Files:** Create `collector/itunes_xml.py`, `collector/sources/apple_music.py`; Test `tests/test_itunes_xml.py`, `tests/test_sources_apple_music.py`
 
 **Interfaces:**
-- `es256.sign_jwt(header: dict, payload: dict, pem_private_key: str) -> str` — parses a PKCS#8 P-256 key (minimal DER reader), signs with ECDSA P-256/SHA-256 using a deterministic RFC 6979 nonce, outputs raw `r||s` base64url. `es256.verify_jwt(token: str, public_xy: tuple[int, int]) -> bool` exists for the test only.
-  - Tests: `test_rfc6979_vector` (RFC 6979 §A.2.5 P-256/SHA-256 message "sample" → exact `r`, `s`), `test_sign_then_verify`, `test_rejects_non_p256_key`.
-  - **If the user prefers** (open question 2), replace this with a "paste a developer token" field and drop `es256.py`.
-- `AppleMusicSource`: fields `team_id`, `key_id`, `private_key` (secret, multiline, help: "Paste the contents of the AuthKey_XXXX.p8 file"), `storefront` (default `"us"`, read from the link when present). Developer token cached in creds for 30 days (`exp` = now + 30 d). Links with `pl.u-` and `pl.` both use the catalog endpoint. Paging via `next`. `isrc` from `attributes.isrc`.
-- `AmazonMusicSource`: fields `client_id`, `client_secret` (secret), `api_key` (secret); `uses_oauth=True` with Login with Amazon (`https://www.amazon.com/ap/oa`, token `https://api.amazon.com/auth/o2/token`), scope from the spike notes. `limits` text: "Amazon Music's API is invite-only. This only works if Amazon has approved your developer account." A 403 whose body mentions the security profile → `CredentialError(fix="Ask Amazon Music to enable your Security Profile, or use another source.")`.
+- `itunes_xml` (also used by the iTunes library reader in Task 10):
+  - `location_to_path(url: str) -> str` — `file:///Users/a/Music/x%20y.m4a` → `/Users/a/Music/x y.m4a`; `file://localhost/C:/Users/a/Music/x%20y.m4a` → `C:/Users/a/Music/x y.m4a` (pure string work, same result on any OS).
+  - `read_plist(data: bytes) -> dict` — `plistlib.loads`; any error → `SourceError("This doesn't look like a playlist exported from Apple Music or iTunes.")`.
+  - `playlists_from_plist(plist: dict) -> list[Playlist]` — one `Playlist` per entry in `Playlists` that has `Playlist Items`, skipping the `Master`/`Library` playlist and `Distinguished Kind` system playlists. Track order follows `Playlist Items`. `SourceTrack.id` = `Persistent ID`, `duration` = `Total Time` / 1000, `url` = `""`, artist falls back to `Album Artist`.
+  - `parse_text_export(filename: str, data: bytes) -> Playlist` — tab-separated with a header row. Decoding: UTF-16 by BOM (Unicode text), UTF-8 with or without BOM, else cp1252 on Windows-style CRLF files, else mac_roman. Columns found by header name (`Name`, `Artist`, `Album`, `Time`, `Album Artist`), with the names Task 1 recorded. `Time` accepts seconds or `m:ss`. Playlist name = file name without extension. `SourceTrack.id` = `"txt:" + sha1(artist|title|album)[:16]`.
+- `AppleMusicSource`: `id="apple_music"`, `name="Apple Music"`, `fields=[]`, `input="file"`, `file_types=[".xml", ".txt"]`, `intro="No API key needed. Export the playlist from Apple Music, then drop the file here."`, `export_steps` = the Mac and Windows steps in the spec's screen 2′, word for word. `parse_file` dispatches on content (`<?xml`/`<plist` → plist, else text). `.m3u`/`.m3u8` or content starting `#EXTM3U` → `SourceError("This file only lists downloaded songs. Export again with Format set to XML.")`. Zero tracks → `SourceError("That playlist is empty.")`. `parse_link` always raises `SourceError("Apple Music playlists are imported from a file. Choose Apple Music and follow the steps.")`; `matches_link` is true for `music.apple.com` so a pasted Apple link gets the `wrong_source` hint.
+- Tests (`test_itunes_xml.py`, `test_sources_apple_music.py`): `test_location_mac`, `test_location_windows_localhost`, `test_plist_playlist_order` (fixture: tracks listed in a different order in `Tracks` than in `Playlist Items` → output follows `Playlist Items`), `test_plist_skips_library_and_system_playlists`, `test_library_export_returns_several_playlists`, `test_streaming_track_without_location_is_kept`, `test_text_export_utf16` and `test_text_export_plain` (Task 1 fixtures → same 3 tracks as the XML fixture), `test_time_m_ss`, `test_m3u_is_refused_with_hint`, `test_garbage_is_source_error`, `test_apple_link_detected_as_apple_music`.
 
 ---
 
@@ -271,10 +273,11 @@ Each library reader turns the user's music app into the same `list[LocalTrack]` 
 **Files:** Create `collector/libraries/itunes.py`; Test `tests/test_libraries.py`
 
 **Interfaces:**
-- Produces: `ItunesLibrary(Library)` with `id="itunes"`, `name="iTunes / Apple Music"`, `needs="file"`. `location_to_path(url: str) -> str` handles `file:///Users/a/Music/x%20y.m4a` → `/Users/a/Music/x y.m4a` and `file://localhost/C:/Users/a/Music/x%20y.m4a` → `C:/Users/a/Music/x y.m4a` (pure string work, same result on any OS). Reads with `plistlib.load`; skips tracks without `Location`, with `Track Type` = `"URL"`/`"Remote"`, or with `Podcast`/`Movie`/`TV Show` true. Duration from `Total Time` (ms). Artist falls back to `Album Artist`.
+- Consumes: `itunes_xml.location_to_path`, `itunes_xml.read_plist` (Task 8).
+- Produces: `ItunesLibrary(Library)` with `id="itunes"`, `name="iTunes / Apple Music"`, `needs="file"`. Reads with `itunes_xml.read_plist` (wrapping its error as `LibraryError`); skips tracks without `Location`, with `Track Type` = `"URL"`/`"Remote"`, or with `Podcast`/`Movie`/`TV Show` true. Duration from `Total Time` (ms). Artist falls back to `Album Artist`.
 - `help_text` explains how to get the XML on macOS (Music → Settings → Advanced → "Share Library XML with other applications", or File → Library → Export Library) and on Windows (iTunes → Edit → Preferences → Advanced → "Share iTunes Library XML with other applications").
 
-- [ ] **Step 1: Failing tests:** `test_location_mac`, `test_location_windows_localhost`, `test_loads_fixture_plist` (fixture built with `plistlib.dumps` in `setUp`: 3 tracks — one local file, one Apple Music stream with no `Location`, one podcast → 1 track with title/artist/album/duration), `test_bad_xml_is_library_error`.
+- [ ] **Step 1: Failing tests:** `test_loads_fixture_plist` (fixture built with `plistlib.dumps` in `setUp`: 3 tracks — one local file, one Apple Music stream with no `Location`, one podcast → 1 track with title/artist/album/duration), `test_bad_xml_is_library_error`.
 - [ ] **Step 2–4:** FAIL → implement → PASS.
 - [ ] **Step 5:** Commit `feat(library): iTunes / Apple Music library XML`.
 
@@ -363,7 +366,7 @@ Each library reader turns the user's music app into the same `list[LocalTrack]` 
 - `GET /api/sources` → `[{id, name, icon, help_url, help_text, link_example, limits, uses_oauth, fields:[{key,label,secret,help,placeholder,multiline}], values: public_view, status: {state, error, fix}}]`
 - `POST /api/sources/<id>/credentials` `{values}` → saves → `{status}`
 - `POST /api/sources/<id>/test` `{values?}` → tests `values` merged over stored creds **without saving** → `{ok: true, message}` or `{ok: false, error, fix}` (HTTP 200 both ways). On success with no `values`, `mark_ok`.
-- `GET /login/<id>` → OAuth redirect; `GET /callback` (Spotify) and `GET /callback/<id>` (others) → save tokens → redirect `/?connected=<id>`. Pending OAuth `state` is kept per source in `App`.
+- `GET /login/spotify` → Spotify sign-in redirect; `GET /callback` → save tokens → redirect `/?connected=spotify`. Spotify is the only source with a browser sign-in.
 - `POST /api/sources/<id>/disconnect` → clears tokens only.
 - Tests: `test_library_save_keeps_other_config_lines`, `test_library_test_does_not_save`, `test_sources_never_leak_secrets` (response body doesn't contain the saved secret string), `test_test_does_not_save`, `test_cross_origin_post_refused` (Origin `http://evil.test` → 403), `test_unknown_source_404`.
 - [ ] FAIL → implement → PASS → commit `feat(api): library, sources and credentials`.
@@ -373,13 +376,14 @@ Each library reader turns the user's music app into the same `list[LocalTrack]` 
 **Files:** Modify `collector/web.py`; Test `tests/test_web.py`
 
 **Interfaces:**
-- `POST /api/analyze` `{source, url}` → v1 payload plus `playlist.source`, `playlist.service`. Loads the library with the configured reader. On `LibraryError`: 400 `{error, fix, code: "library"}`. On `CredentialError`: `mark_invalid` and HTTP 401 `{error, fix, code: "credentials", source}`. If `sources.detect(url)` names another source: 400 `{error, code: "wrong_source", detected}`.
+- `POST /api/import-file` `{source, filename, data_b64}` (body limit 64 MB; larger → 413 `{error: "That file is too big. Export just the one playlist."}`) → calls `parse_file`, keeps the result in `App.imports` (same 10-entry limit as analyses) → `{import_id, playlists: [{index, name, count, preview: [{title, artist}] × 5}]}`.
+- `POST /api/analyze` `{source, url}` or `{source, import_id, playlist_index}` → v1 payload plus `playlist.source`, `playlist.service`. Loads the library with the configured reader. On `LibraryError`: 400 `{error, fix, code: "library"}`. On `CredentialError`: `mark_invalid` and HTTP 401 `{error, fix, code: "credentials", source}`. If `sources.detect(url)` names another source: 400 `{error, code: "wrong_source", detected}`.
 - `POST /api/resolve` `{analysis_id, decisions}` → validates every close match is decided, saves choices, stores the result in the analysis → `{matched, missing}`.
 - `POST /api/export/playlist` `{analysis_id, formats: [...], path_style, folder?}` → `{files: [path, ...]}`. `folder` defaults to `cfg.export_dir`; `m3u8` with no folder given still goes to `cfg.playlist_dir` (v1 behaviour for Strawberry).
 - `POST /api/export/missing` `{analysis_id, format, nextup: bool}` → `{file, note_path, note_added, note_ticked, obsidian_url}`; `nextup` ignored when not enabled.
 - `POST /api/reveal` `{path}` → opens the containing folder with `xdg-open` / `open` / `explorer` (by `sys.platform`). Only paths written in this server's lifetime are allowed (kept in `App.written: set[Path]`), else 403.
 - `/api/build` removed.
-- Tests: `test_analyze_credentials_error_shape`, `test_wrong_source_hint`, `test_resolve_requires_all_decisions`, `test_export_writes_selected_formats`, `test_reveal_refuses_unknown_path`.
+- Tests: `test_import_file_then_analyze` (Apple Music XML fixture → analysis with 3 tracks), `test_import_file_too_big`, `test_analyze_credentials_error_shape`, `test_wrong_source_hint`, `test_resolve_requires_all_decisions`, `test_export_writes_selected_formats`, `test_reveal_refuses_unknown_path`.
 - [ ] FAIL → implement → PASS → commit `feat(api): analyze, resolve and export routes`.
 
 ---
@@ -393,21 +397,21 @@ No JS test runner exists, so each task ends with a manual check in the browser p
 **Files:** Modify `static/index.html`, `static/style.css`; Create `static/js/main.js`, `static/js/router.js`, `static/js/api.js`, `static/js/state.js`, `collector/sources/fake.py`; Delete `static/app.js`
 
 **Interfaces:**
-- `router.js`: `register(name: string, {render(el, state), onEnter?(el, state)})`, `go(name: string, {direction: "forward"|"back"} = {direction: "forward"}) -> Promise<void>`, `back() -> Promise<void>` (keeps a history stack). Screens: `library, source, credentials, link, review, export, missing, done`. Start screen: `library` when `status.library.configured` is false, else `source`. While a transition runs, new `go()` calls queue rather than overlap.
+- `router.js`: `register(name: string, {render(el, state), onEnter?(el, state)})`, `go(name: string, {direction: "forward"|"back"} = {direction: "forward"}) -> Promise<void>`, `back() -> Promise<void>` (keeps a history stack). Screens: `library, source, credentials, link, import, review, export, missing, done`. Start screen: `library` when `status.library.configured` is false, else `source`. While a transition runs, new `go()` calls queue rather than overlap.
 - `api.js`: `get(url)`, `post(url, body)`; throws `ApiError` with `.status`, `.code`, `.data`.
-- `state.js`: single object `{library, source, sourceInfo, link, analysis, decisions, exportResult, missingResult, returnTo}`.
+- `state.js`: single object `{library, source, sourceInfo, link, importResult, analysis, decisions, exportResult, missingResult, returnTo}`.
 - CSS: `.screen` absolutely stacked in `.stage`; classes `.enter-from-right`, `.enter-from-left`, `.exit-to-left`, `.exit-to-right`, `.active`, using the Global Constraints timing and a reduced-motion block. Step bar `<ol class="steps">` with `aria-current="step"`. After transition, focus the new screen's `h2` (`tabindex="-1"`).
 - [ ] **Check:** with placeholder screens, Next/Back slide in the right direction with a fade; DevTools "Emulate prefers-reduced-motion" → fade only; fast double-click doesn't stack two screens; Tab focus lands on the heading.
 - [ ] Commit `feat(ui): screen router with slide and fade`.
 
 ### Task 19: Library and source tiles, icons
 
-**Files:** Create `static/js/screens/library.js`, `static/js/screens/source.js`, `static/icons/services/{spotify,apple-music,youtube-music,tidal,qobuz,amazon-music,soundcloud}.svg`, `static/icons/apps/{strawberry,itunes,apple-music,mediamonkey,vlc,winamp,wmp,media-player,folder}.svg`, `static/icons/services/SOURCES.md`
+**Files:** Create `static/js/screens/library.js`, `static/js/screens/source.js`, `static/icons/services/{spotify,apple-music,youtube-music,tidal,qobuz,soundcloud}.svg`, `static/icons/apps/{strawberry,itunes,apple-music,mediamonkey,vlc,winamp,wmp,media-player,folder}.svg`, `static/icons/services/SOURCES.md`
 
 - [ ] **Step 1:** Get each service and app icon from its official brand/press kit or the app's own source/repo (ask the user before downloading; record URL, date, and brand-guideline notes in `SOURCES.md`). `folder.svg` is a plain folder glyph drawn for this app (ask the user before downloading; record URL, date, and brand-guideline notes in `SOURCES.md`). Use the single-colour or full-colour mark as each guideline requires; don't recolour or crop.
-- [ ] **Step 2:** `source.js` renders `GET /api/sources` as a grid of `<button class="tile">` elements (icon 48 px, name below, badge "Set up" for `needs_setup`, "Needs attention" for `invalid`). Keyboard: arrow keys move between tiles. Click → `state.source = id`; `ready` → `go("link")`, otherwise `go("credentials")`.
+- [ ] **Step 2:** `source.js` renders `GET /api/sources` as a grid of `<button class="tile">` elements (icon 48 px, name below, badge "Set up" for `needs_setup`, "Needs attention" for `invalid`). Keyboard: arrow keys move between tiles. Click → `state.source = id`; not `ready` → `go("credentials")`; `ready` → `go(input === "file" ? "import" : "link")`.
 - [ ] **Step 3:** `library.js`: tiles from `GET /api/libraries` (icon, name, subtitle). Picking one shows its `help_text`, a path field prefilled with `detected_path` (or a folder list with **Add folder** for `needs="folders"`), **Test** ("Found N tracks" or error + fix) and **Save & continue** → `go("source")`. Header shows "Library: <name> · Change" on every screen; **Change** → `go("library", {direction: "back"})`.
-- [ ] **Check:** 7 source tiles in REGISTRY order and 4 library tiles, labels under icons, badges right for fake states, works in light and dark mode and at 375 px width. First run (no `[library] type`) opens on the library screen; a `LibraryError` during Analyze lands on it with the message.
+- [ ] **Check:** 6 source tiles in REGISTRY order and 4 library tiles, labels under icons, badges right for fake states, works in light and dark mode and at 375 px width. First run (no `[library] type`) opens on the library screen; a `LibraryError` during Analyze lands on it with the message.
 - [ ] Commit `feat(ui): library and source picker tiles`.
 
 ### Task 20: Credentials set-up and fix sub-steps
@@ -420,14 +424,15 @@ No JS test runner exists, so each task ends with a manual check in the browser p
 - [ ] **Check (fake source):** blank store → set-up screen; Test with `token=bad` shows error and fix; Test with `ok` shows ✓; Save → link screen; set the fake source to fail on analyze → lands on the Fix screen with the message, Save & try again returns to the link screen with the link still filled in.
 - [ ] Commit `feat(ui): credential set-up, fix and test`.
 
-### Task 21: Link and review screens
+### Task 21: Link, file import and review screens
 
-**Files:** Create `static/js/screens/link.js`, `static/js/screens/review.js`
+**Files:** Create `static/js/screens/link.js`, `static/js/screens/import.js`, `static/js/screens/review.js`
 
 - [ ] **Step 1:** `link.js`: source icon + name, input with `link_example` as placeholder, **Analyze** with "Analyzing…" state. `wrong_source` error → message with a **Switch to <Service>** button.
+- [ ] **Step 1b:** `import.js` (Apple Music): the source's `intro` as one short line; Mac / Windows tabs with `export_steps` as a numbered list, opening on the tab for `status.platform` (Mac on Linux); a drop zone (`dragover`/`drop`) plus **Choose file…** (`<input type=file accept=".xml,.txt">`). Read with `FileReader.readAsArrayBuffer`, base64 it, `POST /api/import-file`. One playlist → show "**<name>** · N tracks", the 5-track preview, **Use a different file** and **Continue**. Several → a list to pick one first. Errors appear under the drop zone with the server's message. **Continue** → `POST /api/analyze` with `import_id` → `go("review")`.
 - [ ] **Step 2:** `review.js`: port `renderResults`/`updateBuild` from v1 `app.js` (chips, close-match radios, bulk buttons, details lists). "Open in <Service>" link. **Continue** posts `/api/resolve`, then goes to `export`, or to `missing` when `matched == 0`, or to `done` when both are empty.
-- [ ] **Check:** full fake run to review; remembered choices pre-selected; Continue disabled until all decided.
-- [ ] Commit `feat(ui): link and review screens`.
+- [ ] **Check:** full fake run to review; remembered choices pre-selected; Continue disabled until all decided. Apple Music: drop the XML fixture → preview shows 3 tracks → Continue → review; drop the text fixture → same; drop an `.m3u8` → the "Export again with Format set to XML" message; keyboard-only (Tab to **Choose file…**, Enter) works.
+- [ ] Commit `feat(ui): link, file import and review screens`.
 
 ### Task 22: Export, missing and done screens
 
@@ -467,7 +472,8 @@ No JS test runner exists, so each task ends with a manual check in the browser p
 
 ---
 
-## Open questions (answers change Task 8)
+## Decisions log
 
-1. **Amazon Music:** its API is invite-only. Keep the tile (works only with approved access), or leave Amazon out of v2.0?
-2. **Apple Music signing:** pure-Python ES256 signer (no dependency, ~150 lines of crypto to maintain), or a field where the user pastes a developer token they made elsewhere (simpler, expires up to every 6 months)?
+- 2026-11-08: Apple Music uses file import (exported XML or text), so no API, developer account or token signing is needed.
+- 2026-11-08: Amazon Music removed from v2.0. It has no playlist export and its API is invite-only, so users would need a third-party (sometimes paid) export tool.
+- 2026-11-08: Libraries beyond Strawberry (iTunes/Apple Music, MediaMonkey, music folder) and per-player export formats are in scope.
