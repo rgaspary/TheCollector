@@ -3,6 +3,8 @@
 ## 2.0.0 (unreleased)
 
 ### Added
+- Library and music-service tiles. Services show a "Set up" or "Needs attention" badge; the set-up and fix screens have an optional Test button that never saves, and Spotify adds a Connect button.
+- `COLLECTOR_CONFIG` environment variable to use another config file.
 - Missing-tracks export without NextUp: JSON, CSV, a Markdown checklist (works in Obsidian, Logseq, Joplin, GitHub, VS Code) or plain text with one song per line.
 - Playlist export in M3U8, M3U, PLS, XSPF, iTunes / Music XML, Windows Media Playlist (WPL), CSV and JSON, with absolute, relative or file-name-only paths, plus a table of which format each music app imports best and how.
 - Music libraries besides Strawberry: iTunes / Apple Music (library XML), MediaMonkey (MM5.DB / MM.DB), and any music folder, which covers Winamp, VLC, Windows Media Player and other players.

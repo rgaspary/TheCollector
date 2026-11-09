@@ -115,8 +115,9 @@ class Itunes(unittest.TestCase):
         self.assertTrue(cm.exception.fix)
 
     def test_missing_file_is_library_error(self):
-        with self.assertRaises(LibraryError):
+        with self.assertRaises(LibraryError) as cm:
             ItunesLibrary().load(Path(self.tmp.name) / "none.xml", [])
+        self.assertTrue(str(cm.exception).startswith("iTunes / Apple Music library XML wasn't found"))
 
     def test_help_text_covers_mac_and_windows(self):
         self.assertIn("Share Library XML", ItunesLibrary.help_text)

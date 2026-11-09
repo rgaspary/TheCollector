@@ -33,7 +33,7 @@ def copy_sqlite(db_path: Path, tmp: str) -> Path:
 class StrawberryLibrary(Library):
     id = "strawberry"
     name = "Strawberry"
-    icon = "strawberry.svg"
+    icon = "strawberry.png"
     help_text = "TheCollector reads Strawberry's library file directly. Strawberry can stay open."
     recommended_player = "strawberry"
 

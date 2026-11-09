@@ -463,6 +463,9 @@ No JS test runner exists, so each task ends with a manual check in the browser p
 - [ ] **Check (fake source):** blank store → set-up screen; Test with `token=bad` shows error and fix; Test with `ok` shows ✓; Save → link screen; set the fake source to fail on analyze → lands on the Fix screen with the message, Save & try again returns to the link screen with the link still filled in.
 - [ ] Commit `feat(ui): credential set-up, fix and test`.
 
+> Built 2026-11-09 (Tasks 19 and 20 together). Icons, decided with the user: official logos only where the owner publishes them for this use (Spotify's full logo, green and white; Strawberry's and VLC's app icons from their repositories). Plain icons drawn for TheCollector everywhere else: YouTube Music (no published icon), Apple Music and iTunes (Apple allows its icon only for linking to Apple Music content), MediaMonkey and Winamp (no press kit), Windows Media Player and Media Player (Microsoft doesn't allow its icons without a license). Sources, dates and rules are in `static/icons/SOURCES.md` (one file for both folders). Strawberry and VLC use `.png`.
+> Also: `static/js/errors.js` sends `credentials` errors to the Fix screen and `library` errors to the library screen; `static/js/header.js` holds the library badge; `COLLECTOR_CONFIG` points the app at another config file, so the screens can be tried without touching your own settings.
+
 ### Task 21: Link, file import and review screens
 
 **Files:** Create `static/js/screens/link.js`, `static/js/screens/import.js`, `static/js/screens/review.js`
