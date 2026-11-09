@@ -14,12 +14,12 @@ from . import __version__
 from . import config as config_mod
 from .choices import MISSING, Choices
 from .credentials import CredentialStore
-from .library import LocalTrack, load_library
+from .libraries import LibraryError, get_library
 from .matching import MatchResult, match_playlist
 from .playlist import write_m3u8
 from .sources import CredentialError, SourceError, get_source
 from .sources.spotify import migrate_v1
-from .tracks import Playlist
+from .tracks import LocalTrack, Playlist
 from .vault import NoteResult, write_missing_note
 
 STATIC = config_mod.ROOT / "static"
@@ -88,7 +88,7 @@ class App:
             raise
         self.store.save("spotify", creds)  # keeps a refreshed token
         self.store.mark_ok("spotify")
-        library = load_library(self.cfg.library_file)
+        library = self.load_library()
         results = match_playlist(playlist.tracks, library)
         aid = secrets.token_urlsafe(8)
         with self.lock:
@@ -115,6 +115,14 @@ class App:
             "library_count": len(library),
             "tracks": tracks,
         }
+
+    def load_library(self) -> list[LocalTrack]:
+        try:
+            reader = get_library(self.cfg.library_type)
+        except KeyError:
+            raise LibraryError(f'"{self.cfg.library_type}" isn\'t a library type TheCollector knows.',
+                               fix="Choose your music library again.") from None
+        return reader.load(self.cfg.library_path, self.cfg.library_folders)
 
     def build(self, aid: str, decisions: dict[str, str]) -> dict:
         with self.lock:
@@ -249,6 +257,8 @@ def make_handler(app: App):
                 if self.path == "/api/logout":
                     app.logout()
                     return self._json({"ok": True})
+            except LibraryError as e:
+                return self._json({"error": f"{e} {e.fix}".strip(), "fix": e.fix, "code": "library"}, 400)
             except (SourceError, ValueError, FileNotFoundError) as e:
                 return self._json({"error": str(e)}, 400)
             except OSError as e:

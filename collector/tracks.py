@@ -1,4 +1,4 @@
-"""Tracks and playlists as read from a streaming service."""
+"""Tracks and playlists from a streaming service, and tracks from the local library."""
 from dataclasses import dataclass, field
 
 
@@ -24,3 +24,14 @@ class Playlist:
     name: str
     url: str
     tracks: list[SourceTrack] = field(default_factory=list)
+
+
+@dataclass
+class LocalTrack:
+    """A playable file in the user's own music library."""
+    id: int
+    title: str
+    artist: str
+    album: str
+    duration: int  # seconds
+    path: str

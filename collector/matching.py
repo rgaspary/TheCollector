@@ -8,7 +8,7 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 
-from .library import LocalTrack
+from .tracks import LocalTrack
 from .tracks import SourceTrack
 
 SpotifyTrack = SourceTrack  # v1 name, kept for one release

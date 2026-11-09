@@ -312,6 +312,8 @@ Each library reader turns the user's music app into the same `list[LocalTrack]` 
 - Produces: `MediaMonkeyLibrary(Library)` with `id="mediamonkey"`, `needs="file"`. `detect()` tries `%APPDATA%/MediaMonkey5/MM5.DB`, then `%APPDATA%/MediaMonkey/MM.DB`. `load` copies the DB to a temp folder (as Strawberry does), opens it with `sqlite3`, calls `con.create_collation("IUNICODE", casefold_compare)`, and reads `Songs` (`SongTitle`, `Artist`, `Album`, `SongLength` ms, `SongPath`, `IDMedia`). Paths stored without a drive letter (starting `:\`) get the drive from `Medias.DriveLetter` (A = 0 … Z = 25), joined on `IDMedia`.
 - The exact column names and the drive-letter rule are checked against a real MM5.DB in Task 1's spike (the user's or a fresh MediaMonkey install on Windows). Fix this task's interface from those notes before starting it.
 
+> Built 2026-11-08 from MediaMonkey's documented schema, without a real MM5.DB. The reader checks the tables and columns it uses, so a different layout gives a clear error instead of a crash. When a real MM5.DB is available, load it once and adjust the column names or the drive-letter rule if they differ.
+
 - [ ] **Step 1: Failing tests:** `test_loads_fixture_db` (DB built in `setUp` with the `Songs`/`Medias` columns above, a column declared `COLLATE IUNICODE`, 2 songs) → paths `C:\Music\a.mp3` and `D:\b.flac`; `test_query_with_iunicode_column_works`; `test_missing_db_is_library_error`.
 - [ ] **Step 2–4:** FAIL → implement → PASS.
 - [ ] **Step 5:** Commit `feat(library): MediaMonkey`.

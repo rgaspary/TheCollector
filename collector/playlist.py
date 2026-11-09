@@ -2,7 +2,7 @@
 import re
 from pathlib import Path
 
-from .library import LocalTrack
+from .tracks import LocalTrack
 
 
 def safe_filename(name: str) -> str:
