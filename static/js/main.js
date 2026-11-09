@@ -3,8 +3,11 @@ import { get } from "./api.js";
 import { SCREENS, go, init, register } from "./router.js";
 import { renderLibraryBadge } from "./header.js";
 import { credentialsScreen } from "./screens/credentials.js";
+import { doneScreen } from "./screens/done.js";
+import { exportScreen } from "./screens/export.js";
 import { libraryScreen } from "./screens/library.js";
 import { linkScreen } from "./screens/link.js";
+import { missingScreen } from "./screens/missing.js";
 import { placeholder } from "./screens/placeholder.js";
 import { reviewScreen } from "./screens/review.js";
 import { sourceScreen } from "./screens/source.js";
@@ -13,6 +16,7 @@ import { $, showError, showNotice } from "./ui.js";
 
 const BUILT = {
   library: libraryScreen, source: sourceScreen, credentials: credentialsScreen, link: linkScreen, review: reviewScreen,
+  export: exportScreen, missing: missingScreen, done: doneScreen,
 };
 
 // Which step of the bar each screen belongs to.
