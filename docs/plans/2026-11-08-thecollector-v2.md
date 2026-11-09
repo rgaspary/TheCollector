@@ -415,6 +415,14 @@ Each library reader turns the user's music app into the same `list[LocalTrack]` 
 - Tests: `test_analyze_credentials_error_shape`, `test_wrong_source_hint`, `test_resolve_requires_all_decisions`, `test_export_writes_selected_formats`, `test_reveal_refuses_unknown_path`.
 - [ ] FAIL → implement → PASS → commit `feat(api): analyze, resolve and export routes`.
 
+> Built 2026-11-09 (Tasks 16 and 17 together, since both rewrite `web.py`). Differences from above:
+> - The v1 screen still runs until `feature/step-screens`, so its routes stay for now: `/login`, `/api/build` (resolve + `.m3u8` + NextUp note in one step), `/api/logout`, the v1 fields in `/api/status`, and a `spotify` copy of each track's `track` in the analyze payload. Task 18 removes them.
+> - `GET /api/players` also lists `formats` and `missing_formats` (key, label, ext) for the export screens.
+> - `POST /api/export/missing` takes an optional `folder`; `format` may be empty to only update the NextUp note.
+> - A successful credential test always keeps refreshed sign-in tokens (a refresh can replace the old one), but never saves typed values.
+> - `App` takes `config_path`, `store`, `choices` and `v1_token_file`, so tests run on temp files. `config.save_library()` rewrites only the `[library]` keys and keeps the file's permissions.
+> - Found in the end-to-end check with a real YouTube playlist: a playlist track with no album (YouTube) was always "Different album". Matching now skips the album check when the playlist gives none (39 of 58 found songs became exact).
+
 ---
 
 ## Phase 6 — Frontend

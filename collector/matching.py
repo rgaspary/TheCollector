@@ -213,7 +213,7 @@ def _grade(item: _Indexed, base: str, tags: set[str], album: str, cross_artist: 
     tag_reason = _describe_tags(tags, item.tags)
     if tag_reason:
         reasons.append(tag_reason)
-    if album != item.album:
+    if album and album != item.album:  # no album given (YouTube) means nothing to compare
         reasons.append(f"Different album: {item.track.album or 'unknown'}")
     return Candidate(item.track, round(score, 2), exact=not reasons, reason="; ".join(reasons))
 

@@ -67,6 +67,68 @@ class LoadConfig(unittest.TestCase):
         self.assertEqual(cfg.library_file, platform_paths.default_library_path("strawberry"))
 
 
+V1_CONFIG = """# My settings
+[spotify]
+client_id = "abc"
+
+[library]
+# Strawberry's database
+strawberry_db = "/home/a/.local/share/strawberry/strawberry/strawberry.db"
+folders = [
+  "/old/a",
+  "/old/b",
+]
+# Where built playlists go.
+playlist_dir = "~/Music/Playlists"
+
+[server]
+port = 8766  # keep me
+"""
+
+
+class SaveLibrary(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = write(Path(self.tmp.name) / "config.toml", V1_CONFIG)
+
+    def test_library_save_keeps_other_config_lines(self):
+        config.save_library("folder", None, [Path("/m/a"), Path("/m/b c")], self.path)
+        text = self.path.read_text()
+        for kept in ("# My settings", 'client_id = "abc"', "# Strawberry's database", "# Where built playlists go.",
+                     'playlist_dir = "~/Music/Playlists"', "port = 8766  # keep me"):
+            self.assertIn(kept, text)
+        self.assertNotIn("strawberry_db", text)
+        self.assertNotIn("/old/a", text)
+        cfg = config.load(self.path)
+        self.assertEqual((cfg.library_type, cfg.library_path), ("folder", None))
+        self.assertEqual(cfg.library_folders, [Path("/m/a"), Path("/m/b c")])
+        self.assertEqual(cfg.playlist_dir, Path.home() / "Music/Playlists")
+        self.assertTrue(cfg.library_configured)
+
+    def test_windows_path_round_trips(self):
+        config.save_library("itunes", Path("C:\\Users\\a\\Music\\iTunes\\iTunes Library.xml"), [], self.path)
+        self.assertEqual(str(config.load(self.path).library_path), "C:\\Users\\a\\Music\\iTunes\\iTunes Library.xml")
+
+    def test_saving_twice_keeps_one_of_each_key(self):
+        config.save_library("strawberry", Path("/x.db"), [], self.path)
+        config.save_library("mediamonkey", Path("/y.db"), [], self.path)
+        text = self.path.read_text()
+        self.assertEqual((text.count("type ="), text.count("path ="), text.count("folders =")), (1, 1, 1))
+        self.assertEqual(config.load(self.path).library_path, Path("/y.db"))
+
+    def test_file_permissions_kept(self):
+        self.path.chmod(0o640)
+        config.save_library("folder", None, [], self.path)
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o640)
+
+    def test_no_library_section_appends_one(self):
+        write(self.path, "[server]\nport = 1\n")
+        config.save_library("folder", None, [Path("/m")], self.path)
+        cfg = config.load(self.path)
+        self.assertEqual((cfg.library_type, cfg.library_folders, cfg.port), ("folder", [Path("/m")], 1))
+
+
 class PlatformPaths(unittest.TestCase):
     def test_data_dir_per_platform(self):
         with mock.patch.dict(os.environ, {"APPDATA": "C:/Users/a/AppData/Roaming"}):
@@ -86,6 +148,11 @@ class PlatformPaths(unittest.TestCase):
         self.assertIsNone(platform_paths.default_library_path("mediamonkey", "linux"))
         self.assertIsNone(platform_paths.default_library_path("itunes", "linux"))
         self.assertEqual(platform_paths.default_library_path("folder", "linux"), Path.home() / "Music")
+
+    def test_open_folder_command(self):
+        self.assertEqual(platform_paths.open_folder_command(Path("/a"), "linux"), ["xdg-open", "/a"])
+        self.assertEqual(platform_paths.open_folder_command(Path("/a"), "darwin"), ["open", "/a"])
+        self.assertEqual(platform_paths.open_folder_command(Path("C:/a"), "win32")[0], "explorer")
 
 
 if __name__ == "__main__":
