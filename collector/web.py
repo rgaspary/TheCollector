@@ -16,7 +16,7 @@ from .choices import MISSING, Choices
 from .credentials import CredentialStore
 from .libraries import LibraryError, get_library
 from .matching import MatchResult, match_playlist
-from .playlist import write_m3u8
+from .exporters import ExportItem, export_playlist
 from .sources import CredentialError, SourceError, get_source
 from .sources.spotify import migrate_v1
 from .tracks import LocalTrack, Playlist
@@ -153,7 +153,10 @@ class App:
                 else:
                     raise ValueError(f'Choose an option for "{r.spotify.title}".')
 
-        m3u = write_m3u8(playlist.name, chosen, self.cfg.playlist_dir) if chosen else None
+        m3u = None
+        if chosen:
+            items = [ExportItem(local, source) for local, source in zip(chosen, found)]
+            m3u = export_playlist(playlist, items, ["m3u8"], self.cfg.playlist_dir, "absolute")[0]
         note = NoteResult(None, 0, 0)
         if self.cfg.nextup_enabled:
             note = write_missing_note(self.cfg.vault_path, self.cfg.notes_folder, self.cfg.area,
