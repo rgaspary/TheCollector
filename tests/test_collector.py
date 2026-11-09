@@ -71,6 +71,14 @@ class Matching(unittest.TestCase):
         self.assertEqual(r.status, "close")
         self.assertIn("Different album: Ten", r.candidates[0].reason)
 
+    def test_no_album_in_playlist_is_exact(self):
+        # YouTube Music gives no album, so the album can't count against a match.
+        r = self.match(sp(1, "Creep", "Radiohead", ""))
+        self.assertEqual(r.status, "exact")
+        r = self.match(sp(1, "Smells Like Teen Spirit", "Nirvana", ""))
+        self.assertEqual(r.status, "close")  # still the live version
+        self.assertNotIn("Different album", r.candidates[0].reason)
+
     def test_missing(self):
         self.assertEqual(self.match(sp(1, "Karma Police", "Radiohead", "OK Computer")).status, "missing")
         self.assertEqual(self.match(sp(1, "Totally Unknown", "Nobody", "Nothing")).status, "missing")
