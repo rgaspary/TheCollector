@@ -356,6 +356,8 @@ Each library reader turns the user's music app into the same `list[LocalTrack]` 
 - [ ] **Step 2–4:** FAIL → implement → PASS.
 - [ ] **Step 5:** Commit `feat(export): playlist formats`.
 
+> Built 2026-11-09. Two changes from the interface above: `write` takes the `Playlist` (not just its name), because JSON needs the source and its URL; and iTunes XML always uses absolute locations, since iTunes and the Music app can't import relative ones. `playlist.path_to_uri` turns Windows or POSIX paths into `file://` URIs on any OS. The v1 `write_m3u8` is gone; `/api/build` writes through `export_playlist`.
+
 ### Task 14: NextUp note for any source
 
 **Files:** Modify `collector/vault.py`; Test `tests/test_collector.py`

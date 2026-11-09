@@ -5,7 +5,6 @@ from pathlib import Path
 
 from collector.tracks import LocalTrack
 from collector.matching import SpotifyTrack, match_playlist, split_title
-from collector.playlist import write_m3u8
 from collector.vault import write_missing_note
 
 
@@ -75,17 +74,6 @@ class Matching(unittest.TestCase):
     def test_missing(self):
         self.assertEqual(self.match(sp(1, "Karma Police", "Radiohead", "OK Computer")).status, "missing")
         self.assertEqual(self.match(sp(1, "Totally Unknown", "Nobody", "Nothing")).status, "missing")
-
-
-class Files(unittest.TestCase):
-    def test_m3u8(self):
-        with tempfile.TemporaryDirectory() as d:
-            path = write_m3u8("Road: Trip?", LIBRARY[:2], Path(d))
-            self.assertEqual(path.name, "Road Trip.m3u8")
-            lines = path.read_text().splitlines()
-            self.assertEqual(lines[0], "#EXTM3U")
-            self.assertEqual(lines[2], "#EXTINF:320,Soundgarden - Black Hole Sun")
-            self.assertEqual(lines[3], LIBRARY[0].path)
 
 
 class Note(unittest.TestCase):

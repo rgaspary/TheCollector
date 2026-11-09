@@ -1,8 +1,13 @@
-"""Write .m3u8 playlists Strawberry (and most players) can open."""
+"""File names and track paths for exported playlists."""
+import os
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import Literal
+from urllib.parse import quote
 
-from .tracks import LocalTrack
+PathStyle = Literal["absolute", "relative", "name"]
+
+_WINDOWS = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\)")
 
 
 def safe_filename(name: str) -> str:
@@ -10,12 +15,31 @@ def safe_filename(name: str) -> str:
     return name or "Playlist"
 
 
-def write_m3u8(name: str, tracks: list[LocalTrack], folder: Path) -> Path:
-    folder.mkdir(parents=True, exist_ok=True)
-    path = folder / f"{safe_filename(name)}.m3u8"
-    lines = ["#EXTM3U", f"#PLAYLIST:{name}"]
-    for t in tracks:
-        lines.append(f"#EXTINF:{t.duration or -1},{t.artist} - {t.title}")
-        lines.append(t.path)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return path
+def _pure(path: str) -> PurePosixPath | PureWindowsPath:
+    """The path as written, Windows or POSIX, whatever OS this runs on."""
+    return PureWindowsPath(path) if _WINDOWS.match(path) else PurePosixPath(path)
+
+
+def format_path(track_path: str, export_dir: Path, style: PathStyle) -> str:
+    """The track's path as a playlist should list it.
+
+    absolute: unchanged (works on this computer).
+    relative: from the export folder, with forward slashes (works when music and playlist move together).
+    name:     the file name only.
+    """
+    if style == "name":
+        return _pure(track_path).name
+    if style == "relative":
+        try:
+            return os.path.relpath(track_path, export_dir).replace("\\", "/")
+        except ValueError:  # another drive on Windows: no relative path exists
+            return track_path
+    return track_path
+
+
+def path_to_uri(path: str) -> str:
+    """A file:// URI for an absolute path (Windows or POSIX form), or a percent-encoded relative path."""
+    pure = _pure(path)
+    if pure.is_absolute():
+        return pure.as_uri()
+    return quote(path.replace("\\", "/"), safe="/")
