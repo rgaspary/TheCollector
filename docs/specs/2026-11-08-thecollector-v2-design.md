@@ -6,7 +6,7 @@ Status: draft for review · 2026-11-08
 
 | # | Request | v2.0 answer |
 |---|---|---|
-| 1 | More sources | Apple Music, Qobuz, TIDAL, YouTube Music, next to Spotify |
+| 1 | More sources | YouTube Music, next to Spotify. Apple Music (file import), Qobuz and TIDAL are postponed (see Future features) |
 | 2 | Playlist export | M3U8, M3U, PLS, XSPF (the XML option), iTunes/Music XML, WPL, CSV, JSON |
 | 3 | Missing-tracks export for people without NextUp | User picks JSON, CSV, Markdown or TXT. The NextUp note becomes optional |
 | 4 | Step-by-step screens | One screen per step, sliding left to right with a fade |
@@ -62,9 +62,6 @@ Every source implements one interface (`collector/sources/base.py`). What each n
 | Source | Link it accepts | What the user provides | How the app reads the playlist | Limits to tell the user |
 |---|---|---|---|---|
 | Spotify | `open.spotify.com/playlist/…`, `spotify:playlist:…` | Client ID, then **Connect** (browser sign-in, PKCE) | Web API `/playlists/{id}/items` | Dev-mode apps may only read playlists the user owns or follows |
-| Apple Music | No link: an **exported playlist file** (XML, or plain/Unicode text) | Nothing. No API key or developer account | Parses the file the user exported from the Music app (Mac) or iTunes (Windows): track name, artist, album, time, in playlist order | The playlist must be in the user's library first (**Add to Library** for someone else's playlist). Works for personal and shared playlists alike |
-| Qobuz | `open.qobuz.com/playlist/…`, `play.qobuz.com/playlist/…`, `qobuz.com/…/playlists/…/<id>` | App ID, App secret, email, password | `user/login` → user token (password is **not** stored, only the token); `playlist/get?extra=tracks` | App ID/secret come from Qobuz on request (api@qobuz.com) |
-| TIDAL | `tidal.com/(browse/)playlist/<uuid>`, `listen.tidal.com/playlist/<uuid>` | Client ID, Client secret | Client-credentials token; `openapi.tidal.com/v2/playlists/{id}/relationships/items?include=items` | Public playlists only in v2.0 |
 | YouTube Music | `music.youtube.com/playlist?list=…`, `youtube.com/playlist?list=…` | YouTube Data API v3 key | `playlistItems.list` + `videos.list` (durations) | Public/unlisted playlists only. Titles like "Artist - Song" and "Artist - Topic" channels are parsed into artist/title |
 
 The Task 1 spike confirms each endpoint before any source is built; the plan updates this table with what it finds.
@@ -86,15 +83,15 @@ The Task 1 spike confirms each endpoint before any source is built; the plan upd
    │         1b Fix credentials ────┤ (only when needed)
    ▼                                ▼
 2 Playlist link ───────────────────────┐
-2′ Import playlist file (Apple Music) ─┴──► 3 Review matches ──► 4 Export playlist ──► 5 Missing tracks ──► 6 Done
+2′ Import playlist file (later)  ──────┴──► 3 Review matches ──► 4 Export playlist ──► 5 Missing tracks ──► 6 Done
 ```
 
 - **0 Library:** tiles for Strawberry, iTunes / Apple Music, MediaMonkey, Music folder (subtitle "Winamp, VLC, Windows Media Player, others"). The app fills in the detected path; **Test** reports "Found 12,345 tracks" or what's wrong. **Save & continue**. Shown once; the header shows the library name with a **Change** link.
-- **1 Source:** grid of tiles, each with the service's official icon and its name underneath. A small badge on the tile shows "Set up" or "Needs attention". Apple Music needs no set-up and goes straight to screen 2′.
+- **1 Source:** grid of tiles, each with the service's official icon and its name underneath. A small badge on the tile shows "Set up" or "Needs attention". v2.0 has two tiles: Spotify and YouTube Music.
 - **1a Set up:** "Where to get these" help with a link to the service's developer page, the fields, an optional **Test** button that reports OK or the exact error, and **Save & continue**. Spotify adds a **Connect** button (browser sign-in) after the fields are saved.
-- **1b Fix:** like 1a, plus a red box saying what went wrong (the service's message) and how to fix it (per-source text, e.g. "Your TIDAL client secret was rejected. Copy it again from developer.tidal.com → Dashboard"). Fields come prefilled, secrets show as saved. **Save & try again** goes back to where the user was (source pick or analyze).
+- **1b Fix:** like 1a, plus a red box saying what went wrong (the service's message) and how to fix it (per-source text, e.g. "YouTube didn't accept the API key. Copy it again from console.cloud.google.com → APIs & Services → Credentials"). Fields come prefilled, secrets show as saved. **Save & try again** goes back to where the user was (source pick or analyze).
 - **2 Link:** paste field with the chosen service's example link, **Analyze**, progress state. A link from the wrong service gets a hint ("That's a Spotify link — switch source?").
-- **2′ Import file (Apple Music only, replaces 2):**
+- **2′ Import file (Apple Music only, replaces 2). Postponed with the Apple Music source; the design is kept here for then:**
   - One-line intro: "No API key needed. Export the playlist from Apple Music, then drop the file here."
   - Numbered steps, Mac / Windows tabs, the tab for the running OS selected first:
     - **Mac (Music app):** 1. Open Music. 2. If the playlist isn't yours, open it and click **Add** (+) so it's in your library. 3. Click the playlist in the sidebar. 4. Choose **File → Library → Export Playlist…** 5. Set **Format** to **XML** and click **Save**. 6. Drop the saved file below.
@@ -167,6 +164,9 @@ Planned for after v2.0, not built in this release:
 
 | Feature | Why later | What it needs |
 |---|---|---|
+| Apple Music source (file import, screen 2′) | Postponed 2026-11-08 to ship v2.0 with Spotify and YouTube Music first | No link: an **exported playlist file** (XML, or plain/Unicode text); Nothing. No API key or developer account; Parses the file the user exported from the Music app (Mac) or iTunes (Windows): track name, artist, album, time, in playlist order; The playlist must be in the user's library first (**Add to Library** for someone else's playlist). Works for personal and shared playlists alike |
+| Qobuz source | Postponed 2026-11-08. App ID/secret must be requested from Qobuz | `open.qobuz.com/playlist/…`, `play.qobuz.com/playlist/…`, `qobuz.com/…/playlists/…/<id>`; App ID, App secret, email, password; `user/login` → user token (password is **not** stored, only the token); `playlist/get?extra=tracks`; App ID/secret come from Qobuz on request (api@qobuz.com) |
+| TIDAL source | Postponed 2026-11-08 | `tidal.com/(browse/)playlist/<uuid>`, `listen.tidal.com/playlist/<uuid>`; Client ID, Client secret; Client-credentials token; `openapi.tidal.com/v2/playlists/{id}/relationships/items?include=items`; public playlists only |
 | SoundCloud source | Registering a SoundCloud app needs an Artist Pro plan | Client ID + secret; client-credentials token (HTTP Basic, cached because tokens are rate-limited to 50 per 12 h); `/resolve?url=` for `soundcloud.com/<user>/sets/<name>` and `on.soundcloud.com/…` links. Fits the existing `Source` interface with no other changes |
 
 ## Out of scope for v2.0
