@@ -45,3 +45,12 @@ def default_library_path(kind: str, platform: str = sys.platform) -> Path | None
             return _env_path("USERPROFILE", home) / "Music"
         return home / "Music"
     return None
+
+
+def open_folder_command(folder: Path, platform: str = sys.platform) -> list[str]:
+    """The command that shows a folder in the system's file manager."""
+    if platform == "win32":
+        return ["explorer", str(folder)]
+    if platform == "darwin":
+        return ["open", str(folder)]
+    return ["xdg-open", str(folder)]

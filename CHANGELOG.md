@@ -14,6 +14,8 @@
 - `[export] dir` setting and new `[library] type / path / folders` settings.
 
 ### Changed
+- New JSON API for the step-by-step screens: library choice and test, sources and saved logins (set up, test, disconnect), analyze any source, resolve, export playlist and missing tracks, and show a saved file's folder.
+- Songs from playlists without album names (YouTube Music) are no longer marked "Different album", so they can match exactly.
 - The NextUp missing-tracks note names the playlist's service ("[YouTube Music](…)" and so on). Existing notes with "[Spotify](…)" links keep merging and ticking off.
 - Remembered close-match picks are stored per service (v1 picks still apply).
 - NextUp is optional: without a `[vault]` section (or NextUp's config file) the app still runs.

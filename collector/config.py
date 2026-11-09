@@ -1,5 +1,8 @@
+import json
 import os
+import re
 import shutil
+import tempfile
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -93,3 +96,62 @@ def load(path: Path = CONFIG_PATH) -> Config:
         host=server.get("host", "127.0.0.1"),
         port=int(server.get("port", 8766)),
     )
+
+
+_TABLE = re.compile(r"^\s*\[\s*[A-Za-z0-9_.\-]+\s*\]\s*(#.*)?$")
+_LIBRARY_KEYS = ("type", "path", "folders", "strawberry_db")
+
+
+def _toml_str(value: str) -> str:
+    return json.dumps(value, ensure_ascii=False)  # a JSON string is a valid TOML basic string
+
+
+def save_library(lib_type: str, path: Path | None, folders: list[Path], config_path: Path = CONFIG_PATH) -> None:
+    """Write the library choice into config.toml's [library] table.
+
+    Only the type/path/folders lines (and v1's strawberry_db) are replaced; comments, other keys and
+    other tables stay as they were.
+    """
+    new = [f"type = {_toml_str(lib_type)}",
+           f"path = {_toml_str(str(path) if path else '')}",
+           "folders = [" + ", ".join(_toml_str(str(f)) for f in folders) + "]"]
+    try:
+        lines = config_path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        lines = []
+
+    start = next((i for i, l in enumerate(lines) if re.match(r"^\s*\[\s*library\s*\]", l)), None)
+    if start is None:
+        while lines and not lines[-1].strip():
+            lines.pop()
+        lines += ([""] if lines else []) + ["[library]"] + new
+    else:
+        end = next((i for i in range(start + 1, len(lines)) if _TABLE.match(lines[i])), len(lines))
+        kept, insert_at, i = [], None, start + 1
+        while i < end:
+            line = lines[i]
+            m = re.match(r"^\s*([A-Za-z0-9_]+)\s*=\s*(.*)$", line)
+            if m and m.group(1) in _LIBRARY_KEYS:
+                if insert_at is None:
+                    insert_at = len(kept)
+                value = m.group(2).split("#")[0].strip()
+                if value.startswith("[") and "]" not in value:  # multi-line array: skip to its end
+                    while i < end and "]" not in lines[i].split("#")[0]:
+                        i += 1
+                i += 1
+                continue
+            kept.append(line)
+            i += 1
+        if insert_at is None:
+            insert_at = 0
+        kept[insert_at:insert_at] = new
+        lines = lines[:start + 1] + kept + lines[end:]
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    mode = config_path.stat().st_mode & 0o777 if config_path.exists() else 0o644
+    fd, tmp = tempfile.mkstemp(dir=config_path.parent, prefix=".config-", suffix=".tmp")
+    if hasattr(os, "fchmod"):
+        os.fchmod(fd, mode)  # keep the file's permissions (mkstemp makes it owner-only)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    os.replace(tmp, config_path)
