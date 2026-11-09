@@ -160,7 +160,7 @@ class App:
         note = NoteResult(None, 0, 0)
         if self.cfg.nextup_enabled:
             note = write_missing_note(self.cfg.vault_path, self.cfg.notes_folder, self.cfg.area,
-                                      playlist.name, playlist.url, missing, found)
+                                      playlist, get_source(playlist.source).name, missing, found)
         self.choices.update(playlist.source, remember)
 
         obsidian = None
