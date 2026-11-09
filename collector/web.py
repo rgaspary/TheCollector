@@ -103,8 +103,6 @@ class App:
 
     # ---- status, libraries, players -----------------------------------------------------------
     def status(self) -> dict:
-        spotify = REGISTRY["spotify"]
-        creds = self.store.get("spotify")
         return {
             "version": __version__,
             "platform": sys.platform,
@@ -112,11 +110,7 @@ class App:
             "export_dir": str(self.cfg.export_dir),
             "playlist_dir": str(self.cfg.playlist_dir),
             "library": self.library_info(),
-            # Read by the v1 screen until the step screens replace it.
-            "client_id_set": bool(creds.get("client_id")),
-            "logged_in": spotify.has_token(creds),
             "redirect_uri": self.cfg.redirect_uri,
-            "notes_folder": self.cfg.notes_folder,
         }
 
     def library_info(self) -> dict:
@@ -281,7 +275,6 @@ class App:
             tracks.append({
                 "index": i,
                 "track": track,
-                "spotify": track,  # the v1 screen's name for it
                 "status": r.status,
                 "remembered": remembered,
                 "candidates": [asdict(c.track) | {"reason": c.reason, "score": c.score} for c in r.candidates],
@@ -409,21 +402,6 @@ class App:
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return {"ok": True}
 
-    def build(self, body: dict) -> dict:
-        """The v1 screen's one-step finish: resolve, write the .m3u8, update the NextUp note."""
-        totals = self.resolve(body)
-        analysis = self._resolved(body)
-        res = analysis.resolution
-        m3u = None
-        if res.items:
-            m3u = export_playlist(analysis.playlist, res.items, ["m3u8"], self.cfg.playlist_dir, "absolute")[0]
-        note = NoteResult(None, 0, 0)
-        if self.cfg.nextup_enabled:
-            note = write_missing_note(self.cfg.vault_path, self.cfg.notes_folder, self.cfg.area, analysis.playlist,
-                                      self.source(analysis.playlist.source).name, res.missing, res.found)
-        return {"playlist_path": str(m3u) if m3u else None, "added": totals["matched"],
-                "missing": totals["missing"], **self._note_payload(note)}
-
 
 _SOURCE_ACTION = re.compile(r"^/api/sources/([a-z0-9_]+)/(credentials|test|disconnect)$")
 
@@ -475,8 +453,6 @@ def make_handler(app: App):
                     return self._json(app.players())
                 if path == "/api/sources":
                     return self._json(app.sources())
-                if path in ("/login", "/login/spotify"):  # /login is the v1 screen's link
-                    return self._login("spotify")
                 if path.startswith("/login/"):
                     return self._login(path[len("/login/"):])
                 if path == "/callback":
@@ -550,12 +526,9 @@ def make_handler(app: App):
                 "/api/export/playlist": app.export_playlist,
                 "/api/export/missing": app.export_missing,
                 "/api/reveal": app.reveal,
-                "/api/build": app.build,  # v1 screen
             }
             if self.path in routes:
                 return routes[self.path](body)
-            if self.path == "/api/logout":  # v1 screen
-                return app.disconnect("spotify")
             m = _SOURCE_ACTION.match(self.path)
             if m:
                 source_id, action = m.groups()

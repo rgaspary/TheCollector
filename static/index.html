@@ -11,29 +11,26 @@
 <link rel="manifest" href="/static/manifest.webmanifest">
 <meta name="theme-color" content="#1f1e1b">
 <link rel="stylesheet" href="/static/style.css">
+<script type="module" src="/static/js/main.js"></script>
 </head>
 <body>
 <main>
   <header>
-    <h1><img src="/static/icon.svg" alt="" class="logo">TheCollector</h1>
-    <p class="sub">Build a Spotify playlist from your own music. Anything you don't have goes to a missing-tracks list in Obsidian.</p>
-    <div id="account" class="account"></div>
+    <h1><img src="/static/icon.svg" alt="" class="logo">TheCollector <span id="version" class="version"></span></h1>
+    <p class="sub">Turn a streaming playlist into one your music app can play from your own files. Anything you don't have goes on a missing-songs list.</p>
+    <p id="library-badge" class="account" hidden></p>
   </header>
 
-  <div id="error" class="error" hidden></div>
-  <section id="setup" class="card" hidden></section>
+  <nav aria-label="Progress">
+    <ol class="steps">
+      <li>Library</li><li>Service</li><li>Playlist</li><li>Review</li><li>Export</li><li>Missing</li><li>Done</li>
+    </ol>
+  </nav>
 
-  <form id="analyze" class="card" hidden>
-    <label for="url">Spotify playlist link</label>
-    <div class="row">
-      <input id="url" type="text" placeholder="https://open.spotify.com/playlist/…" autocomplete="off" required>
-      <button type="submit" class="primary">Analyze</button>
-    </div>
-  </form>
+  <div id="notice" class="notice" role="status" hidden></div>
+  <div id="error" class="error" role="alert" hidden></div>
 
-  <section id="results" hidden></section>
-  <section id="done" class="card done" hidden></section>
+  <div class="stage"></div>
 </main>
-<script src="/static/app.js"></script>
 </body>
 </html>

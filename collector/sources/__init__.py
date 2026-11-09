@@ -1,4 +1,6 @@
 """All streaming sources, in the order their tiles are shown."""
+import os
+
 from .base import CredentialError, Field, Source, SourceError
 
 REGISTRY: dict[str, Source] = {}
@@ -27,5 +29,9 @@ from .youtube_music import YouTubeMusicSource  # noqa: E402
 # Tile order. Apple Music, TIDAL and Qobuz are added here as they're built.
 for _source in (SpotifySource(), YouTubeMusicSource()):
     register(_source)
+
+if os.environ.get("COLLECTOR_FAKE_SOURCES") == "1":  # for trying the screens without real accounts
+    from .fake import FakeSource
+    register(FakeSource())
 
 __all__ = ["REGISTRY", "CredentialError", "Field", "Source", "SourceError", "detect", "get_source", "register"]
