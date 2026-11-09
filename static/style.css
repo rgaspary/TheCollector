@@ -148,3 +148,20 @@ ol.list li { padding: 2px 0; }
 .connect { margin-top: 14px; padding: 12px 14px; border-radius: 8px; background: var(--sel); }
 .connect p { margin: 0 0 10px; }
 @media (max-width: 560px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+
+/* ---- Link and review screens ------------------------------------------------------------- */
+.source-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.source-head h2 { margin: 0; }
+.tile-icon.small { height: 32px; }
+.tile-icon.small img { max-height: 32px; max-width: 96px; }
+.tile-icon.small img[src$="spotify.svg"], .tile-icon.small img[src$="spotify-white.svg"] { width: 96px; }
+.link-form label { margin-top: 4px; }
+.hint .problem { margin-top: 12px; }
+.hint .problem p { margin: 8px 0 0; }
+h3 { font-size: 15.5px; margin: 18px 0 10px; }
+fieldset.choice { border: none; border-top: 1px solid var(--line); margin: 0; padding: 14px 0; min-width: 0; }
+fieldset.choice:first-child { border-top: none; }
+.opt .reason, .opt .path { display: block; }
+.path { color: var(--muted); font-size: 12px; word-break: break-all; margin-top: 2px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.build [data-back] { margin-right: 0; }

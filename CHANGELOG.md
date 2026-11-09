@@ -3,6 +3,7 @@
 ## 2.0.0 (unreleased)
 
 ### Added
+- Playlist and Review steps: paste a link from the chosen service (a link from another service offers to switch), then decide close matches one by one or all at once. Last time's choices are pre-selected.
 - Library and music-service tiles. Services show a "Set up" or "Needs attention" badge; the set-up and fix screens have an optional Test button that never saves, and Spotify adds a Connect button.
 - `COLLECTOR_CONFIG` environment variable to use another config file.
 - Missing-tracks export without NextUp: JSON, CSV, a Markdown checklist (works in Obsidian, Logseq, Joplin, GitHub, VS Code) or plain text with one song per line.
