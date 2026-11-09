@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from collector.library import LocalTrack, url_to_path
+from collector.tracks import LocalTrack
 from collector.matching import SpotifyTrack, match_playlist, split_title
 from collector.playlist import write_m3u8
 from collector.vault import write_missing_note
@@ -78,9 +78,6 @@ class Matching(unittest.TestCase):
 
 
 class Files(unittest.TestCase):
-    def test_url_to_path(self):
-        self.assertEqual(url_to_path("file:///home/gc/Music/a%20b/c.m4a"), "/home/gc/Music/a b/c.m4a")
-
     def test_m3u8(self):
         with tempfile.TemporaryDirectory() as d:
             path = write_m3u8("Road: Trip?", LIBRARY[:2], Path(d))
