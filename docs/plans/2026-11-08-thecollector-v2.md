@@ -476,6 +476,8 @@ No JS test runner exists, so each task ends with a manual check in the browser p
 - [ ] **Check:** full fake run to review; remembered choices pre-selected; Continue disabled until all decided. (Later, with Apple Music: drop the XML fixture → preview shows 3 tracks → Continue → review; drop the text fixture → same; drop an `.m3u8` → the "Export again with Format set to XML" message; keyboard-only (Tab to **Choose file…**, Enter) works.)
 - [ ] Commit `feat(ui): link, file import and review screens`.
 
+> Built 2026-11-09 without Step 1b (file import, postponed with Apple Music). The review screen shows each close-match file's path, so two copies of a song can be told apart, and puts **Back** and **Continue** in the sticky bar. "Switch to <Service>" on a wrong-service link keeps the link and goes through set-up first when that service isn't ready. The resolve result is kept as `state.resolved` (`{matched, missing}`).
+
 ### Task 22: Export, missing and done screens
 
 **Files:** Create `static/js/screens/export.js`, `static/js/screens/missing.js`, `static/js/screens/done.js`
