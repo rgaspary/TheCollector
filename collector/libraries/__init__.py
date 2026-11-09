@@ -2,6 +2,7 @@
 from ..tracks import LocalTrack
 from .base import Library, LibraryError
 from .itunes import ItunesLibrary
+from .mediamonkey import MediaMonkeyLibrary
 from .strawberry import StrawberryLibrary
 
 LIBRARIES: dict[str, Library] = {}
@@ -15,7 +16,7 @@ def get_library(library_id: str) -> Library:
     return LIBRARIES[library_id]
 
 
-for _library in (StrawberryLibrary(), ItunesLibrary()):
+for _library in (StrawberryLibrary(), ItunesLibrary(), MediaMonkeyLibrary()):
     register(_library)
 
 __all__ = ["LIBRARIES", "Library", "LibraryError", "LocalTrack", "get_library", "register"]

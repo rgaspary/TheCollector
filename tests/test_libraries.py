@@ -7,6 +7,7 @@ from pathlib import Path
 from collector import libraries
 from collector.libraries import LibraryError, LocalTrack, get_library
 from collector.libraries.itunes import ItunesLibrary
+from collector.libraries.mediamonkey import MediaMonkeyLibrary, casefold_compare
 from collector.libraries.strawberry import StrawberryLibrary, url_to_path
 
 NS = 1_000_000_000
@@ -14,7 +15,7 @@ NS = 1_000_000_000
 
 class Registry(unittest.TestCase):
     def test_registry_order(self):
-        self.assertEqual(list(libraries.LIBRARIES)[:2], ["strawberry", "itunes"])
+        self.assertEqual(list(libraries.LIBRARIES)[:3], ["strawberry", "itunes", "mediamonkey"])
         self.assertIsInstance(get_library("strawberry"), StrawberryLibrary)
         with self.assertRaises(KeyError):
             get_library("nope")
@@ -114,6 +115,63 @@ class Itunes(unittest.TestCase):
     def test_help_text_covers_mac_and_windows(self):
         self.assertIn("Share Library XML", ItunesLibrary.help_text)
         self.assertIn("Share iTunes Library XML", ItunesLibrary.help_text)
+
+
+class MediaMonkey(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.db = Path(self.tmp.name) / "MM5.DB"
+        con = sqlite3.connect(self.db)
+        con.create_collation("IUNICODE", casefold_compare)
+        con.execute("CREATE TABLE Medias (IDMedia INTEGER PRIMARY KEY, DriveLetter INTEGER, Label TEXT)")
+        con.execute("CREATE TABLE Songs (ID INTEGER PRIMARY KEY, SongTitle TEXT COLLATE IUNICODE, "
+                    "Artist TEXT COLLATE IUNICODE, AlbumArtist TEXT, Album TEXT, SongLength INTEGER, "
+                    "SongPath TEXT COLLATE IUNICODE, IDMedia INTEGER)")
+        con.executemany("INSERT INTO Medias VALUES (?,?,?)", [(1, 2, "System"), (2, 3, "Data")])
+        con.executemany("INSERT INTO Songs VALUES (?,?,?,?,?,?,?,?)", [
+            (1, "Creep", "Radiohead", "", "Pablo Honey", 239000, ":\\Music\\a.mp3", 1),
+            (2, "Jóga", "Björk; Someone", "Björk", "Homogenic", 305400, ":\\b.flac", 2),
+            (3, "Already Full", "", "Band", "", None, "E:\\c.mp3", 1),
+            (4, "Online", "Web", "", "", 1000, "https://example.com/x.mp3", 1),
+        ])
+        con.commit()
+        con.close()
+
+    def test_loads_fixture_db(self):
+        tracks = {t.id: t for t in MediaMonkeyLibrary().load(self.db, [])}
+        self.assertEqual(sorted(tracks), [1, 2, 3])
+        self.assertEqual(tracks[1].path, "C:\\Music\\a.mp3")
+        self.assertEqual(tracks[2].path, "D:\\b.flac")
+        self.assertEqual(tracks[3].path, "E:\\c.mp3")
+        self.assertEqual((tracks[1].title, tracks[1].artist, tracks[1].album, tracks[1].duration),
+                         ("Creep", "Radiohead", "Pablo Honey", 239))
+        self.assertEqual((tracks[2].artist, tracks[2].duration), ("Björk, Someone", 305))
+        self.assertEqual((tracks[3].artist, tracks[3].duration), ("Band", 0))
+
+    def test_query_with_iunicode_column_works(self):
+        # Without the collation sqlite refuses: "no such collation sequence: IUNICODE".
+        con = sqlite3.connect(self.db)
+        with self.assertRaises(sqlite3.OperationalError):
+            con.execute("SELECT * FROM Songs ORDER BY SongTitle").fetchall()
+        con.close()
+        self.assertEqual(len(MediaMonkeyLibrary().load(self.db, [])), 3)
+
+    def test_casefold_compare(self):
+        self.assertEqual(casefold_compare("björk", "BJÖRK"), 0)
+        self.assertLess(casefold_compare("a", "B"), 0)
+        self.assertGreater(casefold_compare("b", "A"), 0)
+
+    def test_missing_db_is_library_error(self):
+        with self.assertRaises(LibraryError):
+            MediaMonkeyLibrary().load(Path(self.tmp.name) / "none.db", [])
+
+    def test_wrong_database_is_library_error(self):
+        other = Path(self.tmp.name) / "other.db"
+        sqlite3.connect(other).execute("CREATE TABLE x (a)").connection.close()
+        with self.assertRaises(LibraryError) as cm:
+            MediaMonkeyLibrary().load(other, [])
+        self.assertIn("MediaMonkey", str(cm.exception))
 
 
 if __name__ == "__main__":
