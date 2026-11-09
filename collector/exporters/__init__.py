@@ -3,6 +3,7 @@ from pathlib import Path
 
 from ..playlist import PathStyle, safe_filename
 from ..tracks import Playlist
+from .missing_formats import MISSING_FORMATS, MissingFormat, export_missing
 from .playlist_formats import PLAYLIST_FORMATS, ExportItem, PlaylistFormat
 
 
@@ -22,4 +23,5 @@ def export_playlist(playlist: Playlist, items: list[ExportItem], formats: list[s
     return paths
 
 
-__all__ = ["PLAYLIST_FORMATS", "ExportItem", "PlaylistFormat", "export_playlist"]
+__all__ = ["MISSING_FORMATS", "PLAYLIST_FORMATS", "ExportItem", "MissingFormat", "PlaylistFormat",
+           "export_missing", "export_playlist"]

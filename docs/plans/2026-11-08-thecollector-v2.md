@@ -376,6 +376,8 @@ Each library reader turns the user's music app into the same `list[LocalTrack]` 
 - Tests: `test_md_is_checklist` (every track line starts with `- [ ] Get "`), `test_txt_one_line_per_track` (`"Radiohead - Creep"`), `test_csv_headers` (`Title,Artist,Album,Duration,ISRC,URL`), `test_json_shape` (keys `playlist, source, source_url, exported_at, tracks`), `test_special_characters` (same values as Task 13).
 - [ ] Steps FAIL → implement → PASS → commit `feat(export): missing-track formats`.
 
+> Built 2026-11-09. `export_missing` also takes `service: str` (after `folder`), since the Markdown lines and intro name the service. The intro line is `vault.intro_line`, shared with the NextUp note.
+
 ---
 
 ## Phase 5 — Server API
