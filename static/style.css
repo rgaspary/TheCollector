@@ -106,3 +106,45 @@ ol.list li { padding: 2px 0; }
 .nav { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; flex-wrap: wrap; }
 .nav [data-back] { margin-right: auto; }
 @media (max-width: 560px) { .steps li { font-size: 0; padding-right: 4px; } .steps li[aria-current="step"] { font-size: 13.5px; padding-right: 10px; } }
+
+/* ---- Tiles (library, service) ------------------------------------------------------------ */
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 14px 0 4px; }
+.tile { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 16px 10px 12px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--card); text-align: center; min-height: 128px;
+  transition: border-color .15s, box-shadow .15s, transform .15s; }
+.tile:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
+.tile:active { transform: scale(.98); }
+.tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tile.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: var(--sel); }
+.tile-icon { height: 48px; display: grid; place-items: center; }
+.tile-icon img { display: block; max-height: 48px; max-width: 112px; }
+.tile-icon img[src$="spotify.svg"], .tile-icon img[src$="spotify-white.svg"] { width: 104px; } /* full logo, ≥ 70 px */
+.tile-name { font-weight: 600; }
+.tile-sub { font-size: 12.5px; color: var(--muted); line-height: 1.3; }
+.badge { font-size: 12px; border-radius: 999px; padding: 1px 8px; }
+.badge:empty { display: none; }
+.badge.setup { background: var(--chip); color: var(--muted); }
+.badge.bad { background: color-mix(in srgb, var(--bad) 14%, var(--card)); color: var(--bad); }
+
+/* ---- Forms on the library and credentials screens ---------------------------------------- */
+.small { font-size: 13px; margin: 4px 0 0; }
+.lib-detail { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 14px; }
+.lib-detail label, .field label { margin-top: 10px; }
+.lib-detail input[type=text], .field input, .field textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
+.field textarea { font-family: ui-monospace, monospace; font-size: 13px; resize: vertical; }
+.folder-list { display: grid; gap: 6px; }
+.add-folder { margin-top: 8px; }
+.fields { margin: 6px 0 4px; }
+.result { margin-top: 12px; font-size: 14px; }
+.result:empty { display: none; }
+.result.ok { color: var(--accent); font-weight: 600; }
+.result.bad { color: var(--bad); }
+.result.bad span { color: var(--text); }
+.problem { background: color-mix(in srgb, var(--bad) 10%, var(--card)); border: 1px solid color-mix(in srgb, var(--bad) 40%, transparent);
+  border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; }
+.problem b { color: var(--bad); }
+.problem p { margin: 4px 0 0; }
+.connect { margin-top: 14px; padding: 12px 14px; border-radius: 8px; background: var(--sel); }
+.connect p { margin: 0 0 10px; }
+@media (max-width: 560px) { .tiles { grid-template-columns: repeat(2, 1fr); } }

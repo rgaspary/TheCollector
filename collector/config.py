@@ -10,7 +10,8 @@ from pathlib import Path
 from . import platform_paths
 
 ROOT = Path(__file__).resolve().parent.parent
-CONFIG_PATH = ROOT / "config.toml"
+# COLLECTOR_CONFIG points at another file, e.g. to try the app without touching your settings.
+CONFIG_PATH = Path(os.environ.get("COLLECTOR_CONFIG") or ROOT / "config.toml").expanduser()
 EXAMPLE_PATH = ROOT / "config.example.toml"
 DATA_DIR = platform_paths.data_dir()
 

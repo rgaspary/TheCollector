@@ -375,5 +375,20 @@ class Task17(ApiTest):
         self.assertEqual(popen.call_args[0][0][-1], str(self.exports.resolve()))
 
 
+
+class Icons(unittest.TestCase):
+    def test_every_named_icon_exists(self):
+        from collector.exporters.players import PLAYERS
+        from collector.libraries import LIBRARIES
+        from collector.sources.fake import FakeSource
+        icons = web.STATIC / "icons"
+        named = [("services", s.icon) for s in list(REGISTRY.values()) + [FakeSource()]]
+        named += [("apps", lib.icon) for lib in LIBRARIES.values()]
+        named += [("apps", p.icon) for p in PLAYERS.values()]
+        for folder, name in named:
+            self.assertTrue((icons / folder / name).is_file(), f"{folder}/{name}")
+        self.assertTrue((icons / "SOURCES.md").is_file())
+
+
 if __name__ == "__main__":
     unittest.main()

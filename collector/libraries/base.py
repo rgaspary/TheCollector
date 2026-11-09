@@ -39,5 +39,7 @@ def require_file(path: Path | None, what: str, fix: str) -> Path:
     if path is None:
         raise LibraryError(f"Choose your {what} first.", fix=fix)
     if not path.is_file():
-        raise LibraryError(f"{what[0].upper() + what[1:]} wasn't found at {path}.", fix=fix)
+        # Capitalise for the start of the sentence, but leave names like "iTunes" alone.
+        start = what if what[1:2].isupper() else what[:1].upper() + what[1:]
+        raise LibraryError(f"{start} wasn't found at {path}.", fix=fix)
     return path
