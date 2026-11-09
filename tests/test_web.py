@@ -241,6 +241,14 @@ class Task16(ApiTest):
         status, _ = self.post("/api/status", headers={"Origin": self.base})
         self.assertEqual(status, 404)  # same origin is let through (and this route only exists as GET)
 
+    def test_v1_routes_are_gone(self):
+        self.assertEqual(self.get("/login")[0], 404)
+        self.assertEqual(self.post("/api/build", {})[0], 404)
+        self.assertEqual(self.post("/api/logout", {})[0], 404)
+        status = self.get("/api/status")[1]
+        self.assertNotIn("logged_in", status)
+        self.assertNotIn("spotify", self.analyzed()["tracks"][0])
+
     def test_unknown_source_404(self):
         self.assertEqual(self.post("/api/sources/nope/test")[0], 404)
         self.assertEqual(self.post("/api/sources/nope/credentials", {"values": {}})[0], 404)
@@ -365,13 +373,6 @@ class Task17(ApiTest):
             status, _ = self.post("/api/reveal", {"path": data["files"][0]})
         self.assertEqual(status, 200)
         self.assertEqual(popen.call_args[0][0][-1], str(self.exports.resolve()))
-
-    def test_v1_build_still_works(self):
-        data = self.analyzed()
-        status, result = self.post("/api/build", {"analysis_id": data["analysis_id"], "decisions": {"1": "missing"}})
-        self.assertEqual(status, 200, result)
-        self.assertEqual((result["added"], result["missing"]), (1, 2))
-        self.assertEqual(Path(result["playlist_path"]), self.playlists / "Road Trip.m3u8")
 
 
 if __name__ == "__main__":
