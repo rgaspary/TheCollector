@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from .tracks import SourceTrack
+from .tracks import Playlist, SourceTrack
 from .playlist import safe_filename
 
 
@@ -23,13 +23,19 @@ def track_key(t: SourceTrack) -> str:
     return t.url or f'"{t.title}" by {t.artist}'
 
 
-def task_line(t: SourceTrack) -> str:
+def task_line(t: SourceTrack, service: str) -> str:
     text = f'- [ ] Get "{_md(t.title)}" by {_md(t.artist)}'
     if t.album:
         text += f" ({_md(t.album)})"
     if t.url:
-        text += f" [Spotify]({t.url})"
+        text += f" [{service}]({t.url})"
     return text
+
+
+def intro_line(playlist: Playlist, service: str) -> str:
+    if playlist.url:
+        return f"Tracks from [the {service} playlist]({playlist.url}) that aren't in your library yet."
+    return f"Tracks from the {service} playlist that aren't in your library yet."
 
 
 def _md(value: str) -> str:
@@ -38,7 +44,9 @@ def _md(value: str) -> str:
 
 
 def _line_key(line: str) -> str | None:
-    m = re.search(r"\[Spotify\]\((https?://[^)]+)\)", line)
+    # The service link ends the line, before any "✅ date" added when ticked. Any label matches,
+    # so v1 lines ("[Spotify](…)") and lines from other services are both recognised.
+    m = re.search(r"\[[^\[\]\\]+\]\((https?://[^)\s]+)\)(?:\s+✅\s+\S+)?\s*$", line)
     if m:
         return m.group(1)
     m = re.match(r'\s*- \[.\] Get (".*") by (.*?)(?: \(.*\))?$', line)
@@ -60,7 +68,7 @@ def _ensure_frontmatter(lines: list[str], key: str, value: str) -> bool:
     return False
 
 
-def write_missing_note(vault: Path, folder: str, area: str, playlist_name: str, playlist_url: str,
+def write_missing_note(vault: Path, folder: str, area: str, playlist: Playlist, service: str,
                        missing: list[SourceTrack], found: list[SourceTrack],
                        today: dt.date | None = None) -> NoteResult:
     """Create or update the note.
@@ -69,7 +77,7 @@ def write_missing_note(vault: Path, folder: str, area: str, playlist_name: str, 
     that are now in the library are ticked off.
     """
     today = today or dt.date.today()
-    title = note_title(playlist_name)
+    title = note_title(playlist.name)
     path = vault / folder / f"{safe_filename(title)}.md"
 
     if not path.exists():
@@ -80,16 +88,16 @@ def write_missing_note(vault: Path, folder: str, area: str, playlist_name: str, 
             "---",
             f'project: "{title.replace(chr(34), "")}"',
             f"area: {area}",
-            f"source: {playlist_url}",
+            f"source: {playlist.url}",
             "tags: [music]",
             "checklist: false",
             "---",
             f"# {title}",
             "",
-            f"Tracks from [the Spotify playlist]({playlist_url}) that aren't in your library yet.",
+            intro_line(playlist, service),
             "",
         ]
-        lines = [task_line(t) for t in missing]
+        lines = [task_line(t, service) for t in missing]
         path.write_text("\n".join(header + lines) + "\n", encoding="utf-8")
         return NoteResult(path, len(lines), 0)
 
@@ -107,7 +115,7 @@ def write_missing_note(vault: Path, folder: str, area: str, playlist_name: str, 
             lines[i] = line.replace("- [ ]", "- [x]", 1) + f" ✅ {today.isoformat()}"
             ticked += 1
 
-    new = [task_line(t) for t in missing if track_key(t) not in existing]
+    new = [task_line(t, service) for t in missing if track_key(t) not in existing]
     if new:
         while lines and not lines[-1].strip():
             lines.pop()

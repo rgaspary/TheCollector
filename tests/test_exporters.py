@@ -5,9 +5,11 @@ import plistlib
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
+from datetime import date
 from pathlib import Path
 
 from collector.exporters import PLAYLIST_FORMATS, ExportItem, export_playlist
+from collector.exporters.missing_formats import MISSING_FORMATS, export_missing
 from collector.exporters.players import PLAYERS, default_player
 from collector.playlist import format_path, path_to_uri, safe_filename
 from collector.tracks import LocalTrack, Playlist, SourceTrack
@@ -212,6 +214,77 @@ class Players(unittest.TestCase):
         self.assertEqual(default_player("mediamonkey", "win32"), "mediamonkey")
         self.assertEqual(default_player("folder", "linux"), "other")
         self.assertEqual(default_player("unknown", "linux"), "other")
+
+
+MISSING = [
+    SourceTrack("a", "Creep", ["Radiohead"], "Pablo Honey", 239, "https://open.spotify.com/track/a", "GBAYE9200070"),
+    SourceTrack("b", 'Tom & "Jerry", <Live>', ["Björk", "Someone"], "", 0, ""),
+]
+DAY = date(2026, 11, 9)
+
+
+def missing_text(key: str, playlist=PLAYLIST, tracks=MISSING) -> str:
+    return MISSING_FORMATS[key].write(playlist, tracks, "Spotify", DAY)
+
+
+class Missing(unittest.TestCase):
+    def test_md_is_checklist(self):
+        lines = missing_text("md").splitlines()
+        self.assertEqual(lines[0], "# Road Trip missing tracks")
+        self.assertIn("[the Spotify playlist](https://open.spotify.com/playlist/pl1)", lines[2])
+        tasks = [l for l in lines if l.startswith("- ")]
+        self.assertEqual(len(tasks), 2)
+        self.assertTrue(all(l.startswith('- [ ] Get "') for l in tasks))
+        self.assertEqual(tasks[0], '- [ ] Get "Creep" by Radiohead (Pablo Honey) [Spotify](https://open.spotify.com/track/a)')
+
+    def test_txt_one_line_per_track(self):
+        self.assertEqual(missing_text("txt"), 'Radiohead - Creep\nBjörk, Someone - Tom & "Jerry", <Live>\n')
+
+    def test_csv_headers(self):
+        rows = list(csv.DictReader(io.StringIO(missing_text("csv"), newline="")))
+        self.assertEqual(list(rows[0]), ["Title", "Artist", "Album", "Duration", "ISRC", "URL"])
+        self.assertEqual(rows[0], {"Title": "Creep", "Artist": "Radiohead", "Album": "Pablo Honey",
+                                   "Duration": "3:59", "ISRC": "GBAYE9200070",
+                                   "URL": "https://open.spotify.com/track/a"})
+        self.assertEqual((rows[1]["Title"], rows[1]["Artist"], rows[1]["Duration"]),
+                         ('Tom & "Jerry", <Live>', "Björk, Someone", ""))
+
+    def test_json_shape(self):
+        data = json.loads(missing_text("json"))
+        self.assertEqual(sorted(data), ["exported_at", "playlist", "source", "source_url", "tracks"])
+        self.assertEqual((data["playlist"], data["source"], data["source_url"], data["exported_at"]),
+                         ("Road Trip", "spotify", "https://open.spotify.com/playlist/pl1", "2026-11-09"))
+        self.assertEqual(data["tracks"][1], {"title": 'Tom & "Jerry", <Live>', "artist": "Björk, Someone",
+                                             "album": "", "duration": 0, "isrc": "", "url": ""})
+
+    def test_special_characters(self):
+        self.assertIn(r'Get "Tom & "Jerry", <Live>" by Björk, Someone', missing_text("md"))
+        for key in MISSING_FORMATS:
+            self.assertIn("Björk", missing_text(key), key)
+
+    def test_markdown_escapes_link_characters(self):
+        t = SourceTrack("c", "Song [Live] #1", ["Band | X"], "", 0, "https://x/c")
+        self.assertIn(r'Get "Song \[Live\] \#1" by Band \| X [Spotify](https://x/c)', missing_text("md", tracks=[t]))
+
+    def test_export_missing_writes_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            unsafe = Playlist("youtube_music", "x", "AC/DC: Best?", "")
+            path = export_missing(unsafe, MISSING, "md", Path(d) / "out", "YouTube Music", DAY)
+            self.assertEqual(path.name, "ACDC Best missing tracks.md")
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("[YouTube Music](https://open.spotify.com/track/a)", text)
+            self.assertIn("Tracks from the YouTube Music playlist", text)
+            # Re-exporting overwrites the file.
+            again = export_missing(unsafe, MISSING[:1], "md", Path(d) / "out", "YouTube Music", DAY)
+            self.assertEqual(again, path)
+            self.assertNotIn("Jerry", path.read_text(encoding="utf-8"))
+            csv_path = export_missing(unsafe, MISSING, "csv", Path(d) / "out", "YouTube Music", DAY)
+            self.assertEqual(csv_path.name, "ACDC Best missing tracks.csv")
+            self.assertIn(b"\r\n", csv_path.read_bytes())
+
+    def test_unknown_missing_format(self):
+        with tempfile.TemporaryDirectory() as d, self.assertRaises(KeyError):
+            export_missing(PLAYLIST, MISSING, "pdf", Path(d), "Spotify", DAY)
 
 
 if __name__ == "__main__":
