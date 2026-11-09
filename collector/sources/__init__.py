@@ -22,7 +22,10 @@ def detect(link: str) -> str | None:
 
 
 from .spotify import SpotifySource  # noqa: E402  (after the helpers above)
+from .youtube_music import YouTubeMusicSource  # noqa: E402
 
-register(SpotifySource())
+# Tile order. Apple Music, TIDAL and Qobuz are added here as they're built.
+for _source in (SpotifySource(), YouTubeMusicSource()):
+    register(_source)
 
 __all__ = ["REGISTRY", "CredentialError", "Field", "Source", "SourceError", "detect", "get_source", "register"]
