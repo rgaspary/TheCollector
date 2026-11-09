@@ -1,21 +1,27 @@
+import os
 import plistlib
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from collector import libraries
 from collector.libraries import LibraryError, LocalTrack, get_library
+from collector.libraries import folder as folder_mod
+from collector.libraries.folder import FolderLibrary, from_path
 from collector.libraries.itunes import ItunesLibrary
 from collector.libraries.mediamonkey import MediaMonkeyLibrary, casefold_compare
 from collector.libraries.strawberry import StrawberryLibrary, url_to_path
+from collector.libraries.tags import Tags
+from tests.test_tags import flac, id3_text, id3v2
 
 NS = 1_000_000_000
 
 
 class Registry(unittest.TestCase):
     def test_registry_order(self):
-        self.assertEqual(list(libraries.LIBRARIES)[:3], ["strawberry", "itunes", "mediamonkey"])
+        self.assertEqual(list(libraries.LIBRARIES), ["strawberry", "itunes", "mediamonkey", "folder"])
         self.assertIsInstance(get_library("strawberry"), StrawberryLibrary)
         with self.assertRaises(KeyError):
             get_library("nope")
@@ -172,6 +178,89 @@ class MediaMonkey(unittest.TestCase):
         with self.assertRaises(LibraryError) as cm:
             MediaMonkeyLibrary().load(other, [])
         self.assertIn("MediaMonkey", str(cm.exception))
+
+
+class Folder(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name) / "Music"
+        self.cache = Path(self.tmp.name) / "folder-index.json"
+        self.put("Radiohead/OK Computer/02 - Paranoid Android.flac", b"no tags here")
+        self.put("Björk/Homogenic/01 Hunter.mp3", id3v2(4, [("TIT2", id3_text(3, "Hunter")),
+                                                            ("TPE1", id3_text(3, "Björk")),
+                                                            ("TALB", id3_text(3, "Homogenic"))]))
+        self.put("Loose/Pearl Jam - Even Flow.ogg", b"")
+        self.put("Loose/notes.txt", b"not music")
+        self.put(".hidden/secret.mp3", b"")
+        self.put("Radiohead/tagged.flac", flac(44100, 441000, [("TITLE", "Creep"), ("ARTIST", "Radiohead")]))
+
+    def put(self, rel: str, data: bytes) -> Path:
+        path = self.root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return path
+
+    def lib(self) -> FolderLibrary:
+        return FolderLibrary(cache_path=self.cache)
+
+    def test_scans_audio_files_only(self):
+        tracks = self.lib().load(None, [self.root])
+        self.assertEqual(sorted(t.title for t in tracks), ["Creep", "Even Flow", "Hunter", "Paranoid Android"])
+        self.assertEqual(len({t.id for t in tracks}), 4)
+
+    def test_title_from_path(self):
+        self.assertEqual(from_path(Path("Radiohead/OK Computer/02 - Paranoid Android.flac"), Tags()),
+                         Tags("Paranoid Android", "Radiohead", "OK Computer", "", 0))
+        self.assertEqual(from_path(Path("Pearl Jam - Even Flow.ogg"), Tags()), Tags("Even Flow", "Pearl Jam", "", "", 0))
+        self.assertEqual(from_path(Path("Radiohead/OK Computer/Radiohead - Airbag.mp3"), Tags()).title, "Airbag")
+        self.assertEqual(from_path(Path("05. Song.mp3"), Tags()), Tags("Song", "", "", "", 0))
+        self.assertEqual(from_path(Path("A/B/x.mp3"), Tags("T", "", "", "Band", 5)), Tags("T", "Band", "B", "Band", 5))
+
+    def test_tracks_use_tags_and_path(self):
+        tracks = {t.title: t for t in self.lib().load(None, [self.root])}
+        self.assertEqual((tracks["Hunter"].artist, tracks["Hunter"].album), ("Björk", "Homogenic"))
+        self.assertEqual((tracks["Creep"].duration, tracks["Even Flow"].artist), (10, "Pearl Jam"))
+        self.assertEqual(Path(tracks["Hunter"].path), self.root / "Björk/Homogenic/01 Hunter.mp3")
+
+    def test_cache_skips_unchanged_files(self):
+        self.lib().load(None, [self.root])
+        with mock.patch.object(folder_mod, "read_tags", wraps=folder_mod.read_tags) as spy:
+            self.lib().load(None, [self.root])
+            self.assertEqual(spy.call_count, 0)
+            changed = self.root / "Radiohead/tagged.flac"
+            changed.write_bytes(flac(44100, 882000, [("TITLE", "Creep (Acoustic)"), ("ARTIST", "Radiohead")]))
+            os.utime(changed, ns=(changed.stat().st_atime_ns, changed.stat().st_mtime_ns + 10**9))
+            titles = {t.title for t in self.lib().load(None, [self.root])}
+            self.assertEqual(spy.call_count, 1)
+        self.assertIn("Creep (Acoustic)", titles)
+
+    def test_removed_files_leave_the_cache(self):
+        self.lib().load(None, [self.root])
+        (self.root / "Loose/Pearl Jam - Even Flow.ogg").unlink()
+        self.lib().load(None, [self.root])
+        self.assertNotIn("Even Flow", self.cache.read_text())
+
+    def test_broken_cache_is_rebuilt(self):
+        self.cache.write_text("{broken")
+        self.assertEqual(len(self.lib().load(None, [self.root])), 4)
+
+    def test_no_folders_is_library_error(self):
+        with mock.patch.object(FolderLibrary, "detect", return_value=None):
+            with self.assertRaises(LibraryError):
+                self.lib().load(None, [])
+
+    def test_missing_folder_is_library_error(self):
+        with self.assertRaises(LibraryError) as cm:
+            self.lib().load(None, [Path(self.tmp.name) / "gone"])
+        self.assertIn("gone", str(cm.exception))
+
+    def test_several_folders_one_missing(self):
+        other = Path(self.tmp.name) / "More"
+        other.mkdir()
+        (other / "Song.mp3").write_bytes(b"")
+        tracks = self.lib().load(None, [self.root, other, Path(self.tmp.name) / "gone"])
+        self.assertEqual(len(tracks), 5)
 
 
 if __name__ == "__main__":
