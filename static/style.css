@@ -180,7 +180,10 @@ label.check input { accent-color: var(--accent); }
 fieldset .link { margin-top: 6px; }
 input.wide { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg);
   color: var(--text); font: inherit; }
-label[for="export-folder"] { margin-top: 16px; }
+label[for="export-folder"], label[for="missing-folder"] { margin-top: 16px; }
+.folder-row { display: flex; gap: 8px; align-items: stretch; }
+.folder-row input.wide { flex: 1; width: auto; min-width: 0; }
+.folder-row button { flex: none; }
 fieldset.cards { display: grid; gap: 6px; }
 .nextup { margin-top: 12px; }
 .files { list-style: none; padding: 0; margin: 10px 0; display: grid; gap: 8px; }

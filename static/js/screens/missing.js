@@ -1,6 +1,7 @@
 // Screen 5: save the songs that aren't in the library, as a file and/or into the NextUp note.
 import { get, post } from "../api.js";
 import { handleApiError } from "../errors.js";
+import { folderRow, wireBrowse } from "../browse.js";
 import { back, go } from "../router.js";
 import { busy, esc, showError } from "../ui.js";
 
@@ -16,6 +17,7 @@ const LAST_FORMAT = "thecollector.missing-format";
 let formats = null;
 let picked = null;       // format key, or "" for no file (NextUp only)
 let nextup = true;
+let folder = "";         // where the file goes; starts in Documents
 let pickedFor = null;    // analysis id the picks belong to
 
 export function missingTracks(state) {
@@ -43,6 +45,7 @@ export const missingScreen = {
       picked = last !== null && (last === "" || formats.some((f) => f.key === last)) ? last : "md";
       if (picked === "" && !state.status.nextup_enabled) picked = "md";
       nextup = true;
+      folder = state.status.missing_dir;
     }
     const tracks = missingTracks(state);
     const options = ORDER.map((k) => formats.find((f) => f.key === k)).filter(Boolean);
@@ -59,6 +62,10 @@ export const missingScreen = {
         ${state.status.nextup_enabled ? `<label class="opt"><input type="radio" name="missing-format" value=""
             ${picked === "" ? "checked" : ""}><span><b>No file</b><span class="reason">Only update the NextUp note.</span></span></label>` : ""}
       </fieldset>
+      <div class="missing-folder" ${picked ? "" : "hidden"}>
+        <label for="missing-folder">Save to folder</label>
+        ${folderRow("missing-folder", esc(folder))}
+      </div>
       ${state.status.nextup_enabled ? `<label class="check nextup"><input type="checkbox" ${nextup ? "checked" : ""}>
         Also update my NextUp note (adds these songs, ticks off ones now in your library)</label>` : ""}
 
@@ -73,8 +80,11 @@ export const missingScreen = {
     el.querySelectorAll('input[name="missing-format"]').forEach((r) => r.addEventListener("change", () => {
       picked = r.value;
       try { localStorage.setItem(LAST_FORMAT, picked); } catch { /* private mode */ }
+      el.querySelector(".missing-folder").hidden = !picked;
       update();
     }));
+    el.querySelector("#missing-folder").addEventListener("input", (e) => { folder = e.target.value; });
+    wireBrowse(el);
     el.querySelector(".nextup input")?.addEventListener("change", (e) => { nextup = e.target.checked; update(); });
     el.querySelector("[data-back]").addEventListener("click", () => back());
     el.querySelector("[data-skip]").addEventListener("click", () => { state.missingResult = null; go("done"); });
@@ -85,6 +95,7 @@ export const missingScreen = {
         state.missingResult = await post("/api/export/missing", {
           analysis_id: state.analysis.analysis_id,
           format: picked || null,
+          folder: folder.trim(),
           nextup: state.status.nextup_enabled && nextup,
         });
         await go("done");

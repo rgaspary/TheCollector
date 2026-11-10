@@ -13,12 +13,12 @@ type = "strawberry"
 path = ""
 # Music folders to scan when type = "folder".
 folders = ["~/Music"]
-# Where built playlists (.m3u8) are saved.
-playlist_dir = "~/Music/Playlists"
 
 [export]
-# Where exported playlists and missing-track lists are saved.
-dir = "~/Music/TheCollector Exports"
+# Where playlists and missing-song lists are saved unless you pick another folder in the app.
+# Leave these out to use the Playlists folder inside your Music folder, and your Documents folder.
+# playlist_dir = "~/Music/Playlists"
+# missing_dir = "~/Documents"
 
 [vault]
 # Optional: remove this section if you don't use NextUp.

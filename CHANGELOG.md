@@ -3,6 +3,8 @@
 ## 2.0.0 (unreleased)
 
 ### Added
+- Browse… buttons next to the playlist and missing-list folders. They open your desktop's own folder picker: the KDE or GNOME dialog through the desktop portal on Linux (or kdialog / zenity), the folder dialog on Windows, and Finder's on macOS.
+- A folder field on the Missing step, so the missing-songs list can be saved anywhere.
 - Rockbox (iPods and other players running Rockbox) in the Export step's app list. It picks M3U8 with paths relative to the playlist, and explains how to copy the music and playlist so the paths still work on the player.
 - A warning on the Library and Review steps when Strawberry's library is missing music files that are in its folders (Strawberry hasn't rescanned), with how to fix it.
 - Export, Missing and Done steps: pick the app you'll open the playlist in (its best format is ticked and its import steps shown), save the missing songs as a file and/or into the NextUp note, then open the folder or the note from the Done screen.
@@ -17,9 +19,10 @@
 - Version number (`collector.__version__`).
 - Runs its data folder per OS: Linux `~/.local/share/thecollector`, Windows `%APPDATA%\TheCollector`, macOS `~/Library/Application Support/TheCollector`.
 - Saved settings per streaming service in `credentials.json` in the data folder (readable only by you). Your v1 Spotify Client ID and login move there automatically.
-- `[export] dir` setting and new `[library] type / path / folders` settings.
+- New `[library] type / path / folders` settings, and `[export] playlist_dir / missing_dir`.
 
 ### Changed
+- Playlists are saved to the Playlists folder inside your Music folder, and missing-song lists to your Documents folder, unless you pick another folder. Both follow the system's own Music and Documents folders (translated names, OneDrive, another drive). `[library] playlist_dir` from v1 still works; `[export] dir` is no longer used.
 - Starting the app when it's already running opens the running copy instead of crashing. If another program has the port, a short message says so.
 - The page is now a series of steps (Library, Service, Playlist, Review, Export, Missing, Done) that slide left and right with a fade, or only fade when the system asks for reduced motion.
 - New JSON API for the step-by-step screens: library choice and test, sources and saved logins (set up, test, disconnect), analyze any source, resolve, export playlist and missing tracks, and show a saved file's folder.

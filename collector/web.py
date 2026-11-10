@@ -16,7 +16,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import __version__, platform_paths
+from . import __version__, folder_picker, platform_paths
 from . import config as config_mod
 from .choices import MISSING, Choices
 from .credentials import CredentialStore
@@ -107,7 +107,7 @@ class App:
             "version": __version__,
             "platform": sys.platform,
             "nextup_enabled": self.cfg.nextup_enabled,
-            "export_dir": str(self.cfg.export_dir),
+            "missing_dir": str(self.cfg.missing_dir),
             "playlist_dir": str(self.cfg.playlist_dir),
             "library": self.library_info(),
             "redirect_uri": self.cfg.redirect_uri,
@@ -354,16 +354,8 @@ class App:
         if not analysis.resolution.items:
             raise ValueError("No songs matched, so there's no playlist to export.")
         folder = str(body.get("folder") or "").strip()
-        groups: dict[Path, list[str]] = {}
-        for fmt in formats:
-            if folder:
-                target = Path(folder).expanduser()
-            else:  # m3u8 keeps v1's place (Strawberry's playlist folder); the rest go to the export folder
-                target = self.cfg.playlist_dir if fmt == "m3u8" else self.cfg.export_dir
-            groups.setdefault(target, []).append(fmt)
-        files: list[Path] = []
-        for target, fmts in groups.items():
-            files += export_playlist(analysis.playlist, analysis.resolution.items, fmts, target, style)
+        target = Path(folder).expanduser() if folder else self.cfg.playlist_dir
+        files = export_playlist(analysis.playlist, analysis.resolution.items, formats, target, style)
         self._remember_written(files)
         return {"files": [str(p) for p in files]}
 
@@ -378,7 +370,7 @@ class App:
         if fmt and res.missing:
             folder = str(body.get("folder") or "").strip()
             file = export_missing(playlist, res.missing, fmt, Path(folder).expanduser() if folder else
-                                  self.cfg.export_dir, service)
+                                  self.cfg.missing_dir, service)
             self._remember_written([file])
         note = NoteResult(None, 0, 0)
         if body.get("nextup") and self.cfg.nextup_enabled:
@@ -396,6 +388,13 @@ class App:
                 {"vault": self.cfg.vault_name, "file": rel}, quote_via=urllib.parse.quote)
         return {"note_path": str(note.path) if note.path else None, "note_added": note.added,
                 "note_ticked": note.ticked, "obsidian_url": obsidian}
+
+    @staticmethod
+    def choose_folder(body: dict) -> dict:
+        try:
+            return {"folder": folder_picker.choose_folder(str(body.get("start") or ""))}
+        except folder_picker.PickerUnavailable as e:
+            raise ApiError(501, {"error": str(e)}) from e
 
     def reveal(self, body: dict) -> dict:
         try:
@@ -529,6 +528,7 @@ def make_handler(app: App):
             routes = {
                 "/api/library/test": app.test_library,
                 "/api/library": app.save_library,
+                "/api/choose-folder": app.choose_folder,
                 "/api/analyze": app.analyze,
                 "/api/resolve": app.resolve,
                 "/api/export/playlist": app.export_playlist,

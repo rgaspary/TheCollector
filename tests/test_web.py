@@ -67,7 +67,7 @@ path = "{db}"
 playlist_dir = "{playlists}"
 
 [export]
-dir = "{exports}"
+missing_dir = "{exports}"
 
 [server]
 host = "127.0.0.1"
@@ -146,7 +146,7 @@ class Task16(ApiTest):
     def test_status_shape(self):
         status, data = self.get("/api/status")
         self.assertEqual(status, 200)
-        for key in ("version", "platform", "nextup_enabled", "export_dir", "playlist_dir", "library"):
+        for key in ("version", "platform", "nextup_enabled", "missing_dir", "playlist_dir", "library"):
             self.assertIn(key, data)
         self.assertEqual(data["library"]["id"], "strawberry")
         self.assertTrue(data["library"]["configured"])
@@ -351,8 +351,7 @@ class Task17(ApiTest):
         files = [Path(f) for f in data["files"]]
         self.assertEqual({f.name for f in files}, {"Road Trip.m3u8", "Road Trip.xspf", "Road Trip.csv"})
         by_ext = {f.suffix: f for f in files}
-        self.assertEqual(by_ext[".m3u8"].parent, self.playlists)   # v1's place for Strawberry
-        self.assertEqual(by_ext[".xspf"].parent, self.exports)
+        self.assertEqual({f.parent for f in files}, {self.playlists})  # every playlist format goes there
         self.assertIn("/music/Nirvana/Teen.flac", by_ext[".m3u8"].read_text())
         # A chosen folder takes every format.
         chosen = Path(self.tmp.name) / "Chosen"
@@ -388,7 +387,25 @@ class Task17(ApiTest):
         with mock.patch.object(web.subprocess, "Popen") as popen:
             status, _ = self.post("/api/reveal", {"path": data["files"][0]})
         self.assertEqual(status, 200)
-        self.assertEqual(popen.call_args[0][0][-1], str(self.exports.resolve()))
+        self.assertEqual(popen.call_args[0][0][-1], str(self.playlists.resolve()))
+
+    def test_status_names_both_default_folders(self):
+        _, data = self.get("/api/status")
+        self.assertEqual((data["playlist_dir"], data["missing_dir"]), (str(self.playlists), str(self.exports)))
+
+    def test_choose_folder_opens_the_desktop_picker(self):
+        with mock.patch.object(web.folder_picker, "choose_folder", return_value="/home/me/Docs") as choose:
+            status, data = self.post("/api/choose-folder", {"start": "~/Documents"})
+        self.assertEqual((status, data), (200, {"folder": "/home/me/Docs"}))
+        self.assertEqual(choose.call_args[0][0], "~/Documents")
+        with mock.patch.object(web.folder_picker, "choose_folder", return_value=None):
+            self.assertEqual(self.post("/api/choose-folder", {})[1], {"folder": None})  # cancelled
+
+    def test_choose_folder_without_a_picker(self):
+        from collector.folder_picker import PickerUnavailable
+        with mock.patch.object(web.folder_picker, "choose_folder", side_effect=PickerUnavailable("Type it.")):
+            status, data = self.post("/api/choose-folder", {"start": "/x"})
+        self.assertEqual((status, data["error"]), (501, "Type it."))
 
 
 

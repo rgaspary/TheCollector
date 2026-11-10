@@ -1,6 +1,7 @@
 // Screen 4: save the matched playlist for the app the user will open it in.
 import { get, post } from "../api.js";
 import { handleApiError } from "../errors.js";
+import { folderRow, wireBrowse } from "../browse.js";
 import { back, go } from "../router.js";
 import { arrowKeys, busy, esc, iconHTML, showError } from "../ui.js";
 
@@ -14,9 +15,9 @@ const STYLES = [
 let info = null;          // GET /api/players
 let choice = null;        // {player, formats:Set, style, folder, folderEdited, showAll}
 
-// Where files go when nothing else is typed: Strawberry keeps v1's playlist folder, the rest the export folder.
-function defaultFolder(state, player) {
-  return player === "strawberry" ? state.status.playlist_dir : state.status.export_dir;
+// Where playlists go unless the user picks another folder: the Playlists folder inside Music.
+function defaultFolder(state) {
+  return state.status.playlist_dir;
 }
 
 function pickPlayer(state, key) {
@@ -24,7 +25,7 @@ function pickPlayer(state, key) {
   choice.player = key;
   choice.style = player.path_style;
   choice.formats = new Set([player.recommended]);
-  if (!choice.folderEdited) choice.folder = defaultFolder(state, key);
+  if (!choice.folderEdited) choice.folder = defaultFolder(state);
   try { localStorage.setItem(LAST_PLAYER, key); } catch { /* private mode */ }
 }
 
@@ -76,7 +77,7 @@ function draw(el, state) {
     </fieldset>
 
     <label for="export-folder">Save to folder</label>
-    <input type="text" id="export-folder" class="wide" value="${esc(choice.folder)}">
+    ${folderRow("export-folder", esc(choice.folder))}
 
     <div class="nav">
       <button type="button" data-back>Back</button>
@@ -104,6 +105,7 @@ function draw(el, state) {
     choice.folder = e.target.value;
     choice.folderEdited = true;
   });
+  wireBrowse(el);
   el.querySelector("[data-back]").addEventListener("click", () => back());
   el.querySelector("[data-skip]").addEventListener("click", () => {
     state.exportResult = null;

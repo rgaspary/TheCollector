@@ -138,7 +138,7 @@ Not included, with reasons: ASX (superseded by WPL), Rhythmbox/Banshee DB format
 | Markdown | `# <Playlist> missing tracks`, intro line, then `- [ ] Get "Title" by Artist (Album) [Service](url)` lines. Works as a to-do list in Obsidian, Logseq, Joplin, GitHub, VS Code |
 | TXT | `Artist - Title` per line, one blank-line-free list. Pastes into any to-do app, one task per line |
 
-Files go to `[export] dir` (default `~/Music/TheCollector Exports`) as `<Playlist> missing tracks.<ext>`. Re-exporting overwrites the file. (The merge/tick-off behaviour stays a feature of the NextUp note only.)
+Files go to `[export] missing_dir` (default: the Documents folder; changed 2026-11-09, was `[export] dir`) as `<Playlist> missing tracks.<ext>`. Re-exporting overwrites the file. (The merge/tick-off behaviour stays a feature of the NextUp note only.)
 
 ## Config changes
 

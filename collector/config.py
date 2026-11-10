@@ -26,8 +26,8 @@ class Config:
     library_type: str
     library_path: Path | None
     library_folders: list[Path]
-    playlist_dir: Path
-    export_dir: Path
+    playlist_dir: Path   # where playlists are saved unless the user picks another folder
+    missing_dir: Path    # where missing-song lists are saved unless the user picks another folder
     vault_path: Path | None
     vault_name: str | None
     notes_folder: str | None
@@ -81,6 +81,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
     folders = library.get("folders") or []
     vault_path, vault_name, notes_folder = _load_vault(raw)
     server = raw.get("server") or {}
+    export = raw.get("export") or {}
 
     return Config(
         legacy_spotify_client_id=os.environ.get("SPOTIFY_CLIENT_ID") or (raw.get("spotify") or {}).get("client_id", ""),
@@ -88,8 +89,10 @@ def load(path: Path = CONFIG_PATH) -> Config:
         library_path=_path(lib_path) if lib_path else None,
         library_folders=[_path(f) for f in folders],
         library_configured="type" in library or "strawberry_db" in library,
-        playlist_dir=_path(library.get("playlist_dir") or "~/Music/Playlists"),
-        export_dir=_path((raw.get("export") or {}).get("dir") or "~/Music/TheCollector Exports"),
+        # [library] playlist_dir is v1's name for the same setting.
+        playlist_dir=_path(export.get("playlist_dir") or library.get("playlist_dir")
+                           or str(platform_paths.music_dir() / "Playlists")),
+        missing_dir=_path(export.get("missing_dir") or str(platform_paths.documents_dir())),
         vault_path=vault_path,
         vault_name=vault_name,
         notes_folder=notes_folder,

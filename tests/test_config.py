@@ -38,9 +38,21 @@ class LoadConfig(unittest.TestCase):
         self.assertEqual(cfg.vault_path, self.dir / "vault")
         self.assertEqual((cfg.vault_name, cfg.notes_folder), ("Main", "Music"))
 
-    def test_export_dir_default(self):
+    def test_folder_defaults_music_and_documents(self):
         path = write(self.dir / "c.toml", "")
-        self.assertEqual(config.load(path).export_dir, Path.home() / "Music/TheCollector Exports")
+        with mock.patch.object(platform_paths, "music_dir", return_value=Path("/u/Muziek")), \
+                mock.patch.object(platform_paths, "documents_dir", return_value=Path("/u/Documenten")):
+            cfg = config.load(path)
+        self.assertEqual((cfg.playlist_dir, cfg.missing_dir), (Path("/u/Muziek/Playlists"), Path("/u/Documenten")))
+
+    def test_folders_can_be_set(self):
+        path = write(self.dir / "c.toml", '[export]\nplaylist_dir = "/p"\nmissing_dir = "/m"\n')
+        cfg = config.load(path)
+        self.assertEqual((cfg.playlist_dir, cfg.missing_dir), (Path("/p"), Path("/m")))
+
+    def test_v1_playlist_dir_still_read(self):
+        path = write(self.dir / "c.toml", '[library]\nplaylist_dir = "/v1/Playlists"\n')
+        self.assertEqual(config.load(path).playlist_dir, Path("/v1/Playlists"))
 
     def test_v1_library_keys_still_read(self):
         path = write(self.dir / "c.toml", '[library]\nstrawberry_db = "/x/strawberry.db"\n')
@@ -148,6 +160,27 @@ class PlatformPaths(unittest.TestCase):
         self.assertIsNone(platform_paths.default_library_path("mediamonkey", "linux"))
         self.assertIsNone(platform_paths.default_library_path("itunes", "linux"))
         self.assertEqual(platform_paths.default_library_path("folder", "linux"), Path.home() / "Music")
+
+    def test_music_and_documents_from_xdg_user_dirs(self):
+        with tempfile.TemporaryDirectory() as d:
+            home, conf = Path(d) / "home", Path(d) / "conf"
+            conf.mkdir()
+            (conf / "user-dirs.dirs").write_text('XDG_MUSIC_DIR="$HOME/Muziek"\nXDG_DOCUMENTS_DIR="$HOME"\n')
+            with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(conf)}), \
+                    mock.patch.object(Path, "home", return_value=home):
+                self.assertEqual(platform_paths.music_dir("linux"), home / "Muziek")
+                # A folder set to $HOME itself means "not used": fall back to the usual name.
+                self.assertEqual(platform_paths.documents_dir("linux"), home / "Documents")
+            with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(Path(d) / "none")}), \
+                    mock.patch.object(Path, "home", return_value=home):
+                self.assertEqual(platform_paths.music_dir("linux"), home / "Music")
+
+    def test_music_and_documents_elsewhere(self):
+        self.assertEqual(platform_paths.music_dir("darwin"), Path.home() / "Music")
+        self.assertEqual(platform_paths.documents_dir("darwin"), Path.home() / "Documents")
+        with mock.patch.dict(os.environ, {"USERPROFILE": "C:/Users/a"}):  # no registry off Windows
+            self.assertEqual(platform_paths.music_dir("win32"), Path("C:/Users/a/Music"))
+            self.assertEqual(platform_paths.documents_dir("win32"), Path("C:/Users/a/Documents"))
 
     def test_open_folder_command(self):
         self.assertEqual(platform_paths.open_folder_command(Path("/a"), "linux"), ["xdg-open", "/a"])
