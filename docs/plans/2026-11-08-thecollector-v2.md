@@ -488,6 +488,13 @@ No JS test runner exists, so each task ends with a manual check in the browser p
 - [ ] **Check:** written files open in VLC (m3u8, pls, xspf), and the CSV opens in LibreOffice; the `.md` renders as a checklist in Obsidian. The player tiles show only players for this OS.
 - [ ] Commit `feat(ui): export and done screens`.
 
+> Built 2026-11-09. Choices made while building:
+> - The pre-selected app follows the spec: the library decides (Strawberry → Strawberry, iTunes → iTunes or Apple Music by OS, MediaMonkey → MediaMonkey); only a music folder uses the last pick from `localStorage`.
+> - The folder field starts at the playlist folder for Strawberry (v1's place) and the export folder for every other app, until the user types their own.
+> - Missing songs adds a "No file" option when NextUp is set up, and remembers the last format. When nothing is missing, the Export step still updates the NextUp note on the way to Done, so songs now in the library get ticked off as in v1.
+> - Done repeats the chosen app's import steps.
+> - Checked in the browser pane with the test service on four paths: export + missing list + NextUp, skip both, nothing missing (note ticks), nothing matched. Opening the files in VLC, LibreOffice and Obsidian is left to Task 23, since those apps can't run in the sandbox.
+
 ### Task 23: Player import check (Linux, Windows, macOS)
 
 **Files:** Create `docs/compatibility.md`; Modify `collector/exporters/players.py` and the spec table only if a row fails

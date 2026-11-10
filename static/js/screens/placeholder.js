@@ -1,4 +1,4 @@
-// Stand-in screens until each real one is built (plan Tasks 19–22). They only show the flow.
+// Stand-in for screens not built yet: only the Apple Music file import (postponed).
 import { back, go } from "../router.js";
 import { esc } from "../ui.js";
 

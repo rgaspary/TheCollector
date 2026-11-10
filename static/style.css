@@ -165,3 +165,24 @@ fieldset.choice:first-child { border-top: none; }
 .path { color: var(--muted); font-size: 12px; word-break: break-all; margin-top: 2px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .build [data-back] { margin-right: 0; }
+
+/* ---- Export, missing and done screens ---------------------------------------------------- */
+.tiles.players { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); }
+.tiles.players .tile { min-height: 104px; }
+.steps-box { background: var(--sel); border-radius: 8px; padding: 10px 14px; margin: 12px 0 4px; font-size: 14px; }
+fieldset.formats, fieldset.styles, fieldset.cards { border: none; padding: 0; margin: 16px 0 0; min-width: 0; }
+fieldset legend { font-weight: 600; margin-bottom: 6px; padding: 0; }
+label.check { display: flex; gap: 8px; align-items: baseline; font-weight: normal; margin: 4px 0; flex-wrap: wrap; }
+label.check input { accent-color: var(--accent); }
+fieldset .link { margin-top: 6px; }
+input.wide { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg);
+  color: var(--text); font: inherit; }
+label[for="export-folder"] { margin-top: 16px; }
+fieldset.cards { display: grid; gap: 6px; }
+.nextup { margin-top: 12px; }
+.files { list-style: none; padding: 0; margin: 10px 0; display: grid; gap: 8px; }
+.files li { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; display: grid; grid-template-columns: 1fr auto;
+  gap: 2px 12px; align-items: center; }
+.files .file-name { font-weight: 600; }
+.files .path { grid-column: 1; }
+.files [data-reveal] { grid-column: 2; grid-row: 1 / span 2; }
