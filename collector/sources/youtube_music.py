@@ -101,6 +101,23 @@ class YouTubeMusicSource(Source):
                  "under APIs & Services → Credentials. It's free, and the daily limit covers hundreds of playlists.")
     link_example = "https://music.youtube.com/playlist?list=…"
     limits = "Only public and unlisted playlists can be read. YouTube Mixes and Liked Music can't."
+    setup_steps = [
+        "Open https://console.cloud.google.com and sign in with a Google account. Billing isn't needed.",
+        "Create a project: click the project picker at the top, then New project. Any name works.",
+        "Open https://console.cloud.google.com/apis/library/youtube.googleapis.com, check your new project "
+        "is selected, and click Enable.",
+        "Go to APIs & Services → Credentials, click Create credentials → API key, and copy the key "
+        "(it starts with AIza).",
+        "Recommended: edit the key, choose Restrict key under API restrictions, select YouTube Data API v3 "
+        "and save. Then the key can't be used for anything else.",
+        "In TheCollector, open Settings → YouTube Music → Set up, paste the key, click Test, then Save.",
+    ]
+    setup_notes = [
+        "The free daily quota is 10,000 units. Reading a playlist uses about 2 units per 50 songs, so "
+        "it covers hundreds of playlists a day.",
+        "An API key can only read public and unlisted playlists. Make a private playlist unlisted to use it.",
+        "YouTube Mixes and Liked Music can't be read with an API key.",
+    ]
     link_patterns = (r"(?:music\.|www\.|m\.)?youtube\.com/(?:playlist|watch|browse/VL)", r"youtu\.be/.*[?&]list=")
 
     def parse_link(self, text: str) -> str:

@@ -141,6 +141,36 @@ class SaveLibrary(unittest.TestCase):
         self.assertEqual((cfg.library_type, cfg.library_folders, cfg.port), ("folder", [Path("/m")], 1))
 
 
+class SaveFolders(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = write(Path(self.tmp.name) / "config.toml", V1_CONFIG)
+
+    def test_folders_saved_under_export(self):
+        config.save_folders(Path("/home/a/Music/Lists"), Path("/home/a/Docs"), self.path)
+        text = self.path.read_text()
+        self.assertIn("[export]", text)
+        for kept in ("# My settings", 'client_id = "abc"', "port = 8766  # keep me", "strawberry_db"):
+            self.assertIn(kept, text)
+        cfg = config.load(self.path)
+        self.assertEqual((cfg.playlist_dir, cfg.missing_dir), (Path("/home/a/Music/Lists"), Path("/home/a/Docs")))
+
+    def test_saving_twice_keeps_one_of_each_key(self):
+        config.save_folders(Path("/a"), Path("/b"), self.path)
+        config.save_folders(Path("/c"), Path("/d"), self.path)
+        text = self.path.read_text()
+        self.assertEqual((text.count("playlist_dir = \"/"), text.count("missing_dir =")), (1, 1))
+        self.assertEqual(config.load(self.path).missing_dir, Path("/d"))
+
+    def test_old_export_dir_key_is_dropped(self):
+        write(self.path, '[export]\n# where files go\ndir = "~/Old"\n')
+        config.save_folders(Path("/a"), Path("/b"), self.path)
+        text = self.path.read_text()
+        self.assertNotIn("~/Old", text)
+        self.assertIn("# where files go", text)
+
+
 class PlatformPaths(unittest.TestCase):
     def test_data_dir_per_platform(self):
         with mock.patch.dict(os.environ, {"APPDATA": "C:/Users/a/AppData/Roaming"}):

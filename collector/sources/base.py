@@ -43,6 +43,9 @@ class Source:
     help_url: ClassVar[str] = ""
     help_text: ClassVar[str] = ""
     link_example: ClassVar[str] = ""
+    # For the Help screen: numbered set-up steps, then notes. "{redirect_uri}" becomes the real one.
+    setup_steps: ClassVar[list[str]] = []
+    setup_notes: ClassVar[list[str]] = []
     limits: ClassVar[str] = ""
     uses_oauth: ClassVar[bool] = False
     token_keys: ClassVar[tuple[str, ...]] = ("access_token", "refresh_token", "expires_at")

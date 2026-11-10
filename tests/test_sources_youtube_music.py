@@ -48,6 +48,14 @@ class Links(unittest.TestCase):
         self.assertEqual(list(sources.REGISTRY)[:2], ["spotify", "youtube_music"])
 
 
+class SetupSteps(unittest.TestCase):
+    def test_every_real_service_explains_its_set_up(self):
+        for source in (sources.get_source("spotify"), sources.get_source("youtube_music")):
+            self.assertGreaterEqual(len(source.setup_steps), 4, source.id)
+            self.assertTrue(any("https://" in step for step in source.setup_steps), source.id)
+        self.assertTrue(any("{redirect_uri}" in step for step in sources.get_source("spotify").setup_steps))
+
+
 class Titles(unittest.TestCase):
     def test_split_topic_channel(self):
         self.assertEqual(split_youtube_title("Creep", "Radiohead - Topic"), ("Creep", ["Radiohead"]))

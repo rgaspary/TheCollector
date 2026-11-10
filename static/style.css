@@ -192,3 +192,34 @@ fieldset.cards { display: grid; gap: 6px; }
 .files .file-name { font-weight: 600; }
 .files .path { grid-column: 1; }
 .files [data-reveal] { grid-column: 2; grid-row: 1 / span 2; }
+
+/* ---- header links, Settings and Help ---------------------------------------------------------- */
+.title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.top-links { display: flex; gap: 16px; }
+.top-links button.link { font-size: 14.5px; text-decoration: none; color: var(--muted); }
+.top-links button.link:hover, .top-links button.link[aria-current="page"] { color: var(--text); text-decoration: underline; }
+.steps.off { opacity: 0.45; }
+.steps.off li[aria-current="step"] { background: none; font-weight: normal; }
+
+.settings section, .help section { border-top: 1px solid var(--line); padding-top: 6px; margin-top: 18px; }
+.settings section:first-of-type, .help section:first-of-type { border-top: none; margin-top: 8px; }
+.settings label { margin-top: 12px; }
+.settings [data-save-folders] { margin-top: 12px; }
+.settings .path { word-break: break-all; }
+.services { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 8px; }
+.service-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line);
+  border-radius: 10px; flex-wrap: wrap; }
+.service-name { flex: 1; min-width: 160px; }
+.service-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.badge.ok { background: color-mix(in srgb, var(--accent) 14%, var(--card)); color: var(--accent); }
+.tile-icon.small { height: 28px; display: inline-grid; vertical-align: middle; min-width: 28px; }
+.tile-icon.small img { max-height: 28px; max-width: 80px; }
+.tile-icon.small img[src$="spotify.svg"], .tile-icon.small img[src$="spotify-white.svg"] { width: 72px; } /* ≥ 70 px */
+.help h3 { display: flex; align-items: center; gap: 10px; }
+.toc { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 8px 0 4px; font-size: 14.5px; }
+.steps-list li, .notes li { margin: 6px 0; line-height: 1.5; }
+.notes { color: var(--muted); font-size: 14px; }
+.help code, .settings code { word-break: break-all; }
+.help details { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin: 8px 0; }
+.help summary { cursor: pointer; font-weight: 600; }
+.help details p { margin: 8px 0 2px; line-height: 1.5; }

@@ -156,11 +156,26 @@ class App:
     def save_library(self, body: dict) -> dict:
         reader, path, folders = self._library_args(body)
         config_mod.save_library(reader.id, path, folders, self.config_path)
+        self._reload_config()
+        return {"library": self.library_info()}
+
+    def save_folders(self, body: dict) -> dict:
+        folders = []
+        for key, what in (("playlist_dir", "playlists"), ("missing_dir", "missing-song lists")):
+            raw = str(body.get(key) or "").strip()
+            path = Path(raw).expanduser() if raw else None
+            if path is None or not path.is_absolute():
+                raise ValueError(f"Give the full path of the folder for {what}, like {Path.home() / 'Music'}.")
+            folders.append(path)
+        config_mod.save_folders(*folders, self.config_path)
+        self._reload_config()
+        return {"playlist_dir": str(self.cfg.playlist_dir), "missing_dir": str(self.cfg.missing_dir)}
+
+    def _reload_config(self) -> None:
         new = config_mod.load(self.config_path)
         new.host, new.port = self.cfg.host, self.cfg.port
         self.cfg = new
         self._config_mtime = self._mtime()
-        return {"library": self.library_info()}
 
     def players(self) -> dict:
         return {
@@ -187,9 +202,14 @@ class App:
             "link_example": s.link_example, "limits": s.limits, "uses_oauth": s.uses_oauth, "input": s.input,
             "fields": [{"key": f.key, "label": f.label, "secret": f.secret, "help": f.help,
                         "placeholder": f.placeholder, "multiline": f.multiline} for f in s.fields],
+            "setup_steps": [self._fill(t) for t in s.setup_steps],
+            "setup_notes": [self._fill(t) for t in s.setup_notes],
             "values": self.store.public_view(s),
             "status": self.store.status(s),
         }
+
+    def _fill(self, text: str) -> str:
+        return text.replace("{redirect_uri}", self.cfg.redirect_uri)
 
     @staticmethod
     def _typed_values(s: Source, body: dict) -> dict:
@@ -529,6 +549,7 @@ def make_handler(app: App):
                 "/api/library/test": app.test_library,
                 "/api/library": app.save_library,
                 "/api/choose-folder": app.choose_folder,
+                "/api/settings/folders": app.save_folders,
                 "/api/analyze": app.analyze,
                 "/api/resolve": app.resolve,
                 "/api/export/playlist": app.export_playlist,

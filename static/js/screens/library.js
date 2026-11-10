@@ -82,7 +82,7 @@ async function draw(el, state) {
     <div class="nav">
       ${canGoBack() ? '<button type="button" data-back>Back</button>' : ""}
       ${lib ? '<button type="button" data-test>Test</button>' : ""}
-      <button type="button" class="primary" data-save ${lib ? "" : "disabled"}>Save &amp; continue</button>
+      <button type="button" class="primary" data-save ${lib ? "" : "disabled"}>${state.returnTo === "settings" ? "Save" : "Save &amp; continue"}</button>
     </div></div>`;
 
   const grid = el.querySelector(".tiles");
@@ -92,7 +92,7 @@ async function draw(el, state) {
     await draw(el, state);
     el.querySelector(`.tile[data-id="${chosen}"]`)?.focus();
   }));
-  el.querySelector("[data-back]")?.addEventListener("click", () => back());
+  el.querySelector("[data-back]")?.addEventListener("click", () => { state.returnTo = null; back(); });
   if (!lib) return;
 
   // Keep what's typed when tiles or folder rows are re-rendered.
@@ -133,7 +133,9 @@ async function draw(el, state) {
       const r = await post("/api/library", body(lib, d));
       state.library = r.library;
       renderLibraryBadge();
-      await go("source");
+      const target = state.returnTo || "source";  // Settings sends people here and wants them back
+      state.returnTo = null;
+      await go(target);
     } catch (err) {
       showError(err.message);
     } finally {

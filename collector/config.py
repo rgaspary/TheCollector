@@ -70,6 +70,7 @@ def _load_vault(raw: dict) -> tuple[Path | None, str | None, str | None]:
 
 def load(path: Path = CONFIG_PATH) -> Config:
     if path == CONFIG_PATH and not path.exists() and EXAMPLE_PATH.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(EXAMPLE_PATH, path)  # first run from a fresh clone
     with open(path, "rb") as f:
         raw = tomllib.load(f)
@@ -110,32 +111,28 @@ def _toml_str(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)  # a JSON string is a valid TOML basic string
 
 
-def save_library(lib_type: str, path: Path | None, folders: list[Path], config_path: Path = CONFIG_PATH) -> None:
-    """Write the library choice into config.toml's [library] table.
+def _save_table(table: str, keys: tuple[str, ...], new: list[str], config_path: Path) -> None:
+    """Replace `keys` in config.toml's [table] with the `new` lines.
 
-    Only the type/path/folders lines (and v1's strawberry_db) are replaced; comments, other keys and
-    other tables stay as they were.
+    Comments, other keys and other tables stay as they were. The table is added if it's missing.
     """
-    new = [f"type = {_toml_str(lib_type)}",
-           f"path = {_toml_str(str(path) if path else '')}",
-           "folders = [" + ", ".join(_toml_str(str(f)) for f in folders) + "]"]
     try:
         lines = config_path.read_text(encoding="utf-8").splitlines()
     except FileNotFoundError:
         lines = []
 
-    start = next((i for i, l in enumerate(lines) if re.match(r"^\s*\[\s*library\s*\]", l)), None)
+    start = next((i for i, l in enumerate(lines) if re.match(rf"^\s*\[\s*{table}\s*\]", l)), None)
     if start is None:
         while lines and not lines[-1].strip():
             lines.pop()
-        lines += ([""] if lines else []) + ["[library]"] + new
+        lines += ([""] if lines else []) + [f"[{table}]"] + new
     else:
         end = next((i for i in range(start + 1, len(lines)) if _TABLE.match(lines[i])), len(lines))
         kept, insert_at, i = [], None, start + 1
         while i < end:
             line = lines[i]
             m = re.match(r"^\s*([A-Za-z0-9_]+)\s*=\s*(.*)$", line)
-            if m and m.group(1) in _LIBRARY_KEYS:
+            if m and m.group(1) in keys:
                 if insert_at is None:
                     insert_at = len(kept)
                 value = m.group(2).split("#")[0].strip()
@@ -147,7 +144,9 @@ def save_library(lib_type: str, path: Path | None, folders: list[Path], config_p
             kept.append(line)
             i += 1
         if insert_at is None:
-            insert_at = 0
+            insert_at = len(kept)
+            while insert_at and not kept[insert_at - 1].strip():  # before the blank lines that end the table
+                insert_at -= 1
         kept[insert_at:insert_at] = new
         lines = lines[:start + 1] + kept + lines[end:]
 
@@ -159,3 +158,20 @@ def save_library(lib_type: str, path: Path | None, folders: list[Path], config_p
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     os.replace(tmp, config_path)
+
+
+def save_library(lib_type: str, path: Path | None, folders: list[Path], config_path: Path = CONFIG_PATH) -> None:
+    """Write the library choice into config.toml's [library] table (v1's strawberry_db goes)."""
+    _save_table("library", _LIBRARY_KEYS, [
+        f"type = {_toml_str(lib_type)}",
+        f"path = {_toml_str(str(path) if path else '')}",
+        "folders = [" + ", ".join(_toml_str(str(f)) for f in folders) + "]",
+    ], config_path)
+
+
+def save_folders(playlist_dir: Path, missing_dir: Path, config_path: Path = CONFIG_PATH) -> None:
+    """Write the default save folders into [export] (v2.0-dev's [export] dir goes)."""
+    _save_table("export", ("playlist_dir", "missing_dir", "dir"), [
+        f"playlist_dir = {_toml_str(str(playlist_dir))}",
+        f"missing_dir = {_toml_str(str(missing_dir))}",
+    ], config_path)

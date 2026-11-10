@@ -45,6 +45,23 @@ class SpotifySource(Source):
     link_example = "https://open.spotify.com/playlist/…"
     limits = ("Apps in Spotify's development mode can usually only read playlists you own or follow. "
               "If a playlist is refused, save a copy to your own account and use that link.")
+    setup_steps = [
+        "Open https://developer.spotify.com/dashboard and log in with your Spotify account. The first time, "
+        "accept the developer terms.",
+        "Click Create app. Any name and description work, for example \"TheCollector\".",
+        "Under Redirect URIs, add {redirect_uri} exactly as shown, then click Add.",
+        "Under \"Which API/SDKs are you planning to use?\", tick Web API. Accept the terms and click Save.",
+        "Open the app's Settings and copy its Client ID. TheCollector doesn't need the Client secret.",
+        "In TheCollector, open Settings → Spotify → Set up, paste the Client ID and click Save. Then click "
+        "Connect and sign in to Spotify in the tab that opens.",
+    ]
+    setup_notes = [
+        "Your app stays in development mode, which is fine for personal use. Only you can sign in, unless you "
+        "add other people under the app's User Management.",
+        "Spotify doesn't let new apps read its own playlists, like Today's Top Hits or Discover Weekly. Add the "
+        "songs to a playlist of your own and use that link.",
+        "If you change TheCollector's port in config.toml, change the Redirect URI in the dashboard to match.",
+    ]
     uses_oauth = True
     link_patterns = (r"open\.spotify\.com/(?:[\w-]+/)?playlist/", r"spotify:playlist:")
 

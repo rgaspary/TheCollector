@@ -27,6 +27,8 @@ class FakeSource(Source):
     help_url = "https://fake.test/dev"
     link_example = "https://fake.test/playlist/…"
     link_patterns = (r"fake\.test/playlist/",)
+    setup_steps = ["Open https://fake.test/dev and make an app.", "Add {redirect_uri} as its address."]
+    setup_notes = ["Tokens last a year."]
 
     def parse_link(self, text: str) -> str:
         return text.rsplit("/", 1)[-1]
@@ -388,6 +390,33 @@ class Task17(ApiTest):
             status, _ = self.post("/api/reveal", {"path": data["files"][0]})
         self.assertEqual(status, 200)
         self.assertEqual(popen.call_args[0][0][-1], str(self.playlists.resolve()))
+
+    def test_sources_carry_setup_steps(self):
+        _, data = self.get("/api/sources")
+        fake = next(s for s in data if s["id"] == "fake")
+        self.assertEqual(fake["setup_steps"][1], f"Add {self.app.cfg.redirect_uri} as its address.")
+        self.assertEqual(fake["setup_notes"], ["Tokens last a year."])
+
+    def test_save_folders(self):
+        lists, docs = Path(self.tmp.name) / "Lists", Path(self.tmp.name) / "Docs"
+        status, data = self.post("/api/settings/folders", {"playlist_dir": str(lists), "missing_dir": str(docs)})
+        self.assertEqual(status, 200, data)
+        self.assertEqual((data["playlist_dir"], data["missing_dir"]), (str(lists), str(docs)))
+        _, after = self.get("/api/status")
+        self.assertEqual((after["playlist_dir"], after["missing_dir"]), (str(lists), str(docs)))
+        self.assertIn("missing_dir", self.config_path.read_text())
+        aid = self.resolved()
+        _, data = self.post("/api/export/missing", {"analysis_id": aid, "format": "txt"})
+        self.assertEqual(Path(data["file"]).parent, docs)
+
+    def test_save_folders_needs_full_paths(self):
+        before = self.config_path.read_text()
+        for body in ({"playlist_dir": "", "missing_dir": "/x"}, {"playlist_dir": "rel/dir", "missing_dir": "/x"},
+                     {"playlist_dir": "/x"}):
+            status, data = self.post("/api/settings/folders", body)
+            self.assertEqual(status, 400, body)
+            self.assertTrue(data["error"])
+        self.assertEqual(self.config_path.read_text(), before)
 
     def test_status_names_both_default_folders(self):
         _, data = self.get("/api/status")

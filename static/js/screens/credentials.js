@@ -56,7 +56,8 @@ export const credentialsScreen = {
       ${fixing ? `<div class="problem" role="alert"><b>${esc(s.status.error)}</b>
         ${s.status.fix ? `<p>${esc(s.status.fix)}</p>` : ""}</div>` : ""}
       <p>${esc(s.help_text)}
-        ${s.help_url ? ` <a href="${esc(s.help_url)}" target="_blank" rel="noopener">Where to get these ↗</a>` : ""}</p>
+        ${s.help_url ? ` <a href="${esc(s.help_url)}" target="_blank" rel="noopener">Where to get these ↗</a>` : ""}
+        ${s.setup_steps?.length ? ` · <button type="button" class="link" data-guide>Step-by-step guide</button>` : ""}</p>
       ${s.uses_oauth && state.status?.redirect_uri ? `<p class="muted small">Redirect URI to add to your app:
         <code>${esc(state.status.redirect_uri)}</code></p>` : ""}
       <form class="fields" novalidate>${s.fields.map((f) => fieldHTML(f, s.values[f.key])).join("")}</form>
@@ -69,7 +70,8 @@ export const credentialsScreen = {
       <div class="nav">
         <button type="button" data-back>Back</button>
         <button type="button" data-test>Test</button>
-        <button type="button" class="primary" data-save>${fixing ? "Save &amp; try again" : "Save &amp; continue"}</button>
+        <button type="button" class="primary" data-save>${fixing ? "Save &amp; try again"
+          : state.returnTo === "settings" ? "Save" : "Save &amp; continue"}</button>
       </div></div>`;
 
     const result = el.querySelector(".result");
@@ -97,6 +99,7 @@ export const credentialsScreen = {
 
     el.querySelector("form").addEventListener("submit", (e) => { e.preventDefault(); el.querySelector("[data-save]").click(); });
     el.querySelector("[data-back]").addEventListener("click", () => { stopPolling(); state.returnTo = null; back(); });
+    el.querySelector("[data-guide]")?.addEventListener("click", () => { stopPolling(); state.helpFor = s.id; go("help"); });
     el.querySelector("[data-test]").addEventListener("click", async (e) => {
       const done = busy(e.target, "Testing…");
       try {

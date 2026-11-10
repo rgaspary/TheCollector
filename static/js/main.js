@@ -5,25 +5,32 @@ import { renderLibraryBadge } from "./header.js";
 import { credentialsScreen } from "./screens/credentials.js";
 import { doneScreen } from "./screens/done.js";
 import { exportScreen } from "./screens/export.js";
+import { helpScreen } from "./screens/help.js";
 import { libraryScreen } from "./screens/library.js";
 import { linkScreen } from "./screens/link.js";
 import { missingScreen } from "./screens/missing.js";
 import { placeholder } from "./screens/placeholder.js";
 import { reviewScreen } from "./screens/review.js";
+import { settingsScreen } from "./screens/settings.js";
 import { sourceScreen } from "./screens/source.js";
 import { state } from "./state.js";
 import { $, showError, showNotice } from "./ui.js";
 
 const BUILT = {
   library: libraryScreen, source: sourceScreen, credentials: credentialsScreen, link: linkScreen, review: reviewScreen,
-  export: exportScreen, missing: missingScreen, done: doneScreen,
+  export: exportScreen, missing: missingScreen, done: doneScreen, settings: settingsScreen, help: helpScreen,
 };
 
-// Which step of the bar each screen belongs to.
+// Which step of the bar each screen belongs to. Settings and Help sit outside the steps.
 const STEP_OF = { library: 0, source: 1, credentials: 1, link: 2, import: 2, review: 3, export: 4, missing: 5, done: 6 };
 
 function markStep(screen) {
-  const step = STEP_OF[screen] ?? 0;
+  const step = STEP_OF[screen] ?? -1;
+  $(".steps").classList.toggle("off", step < 0);
+  document.querySelectorAll(".top-links [data-open]").forEach((b) => {
+    if (b.dataset.open === screen) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
+  });
   document.querySelectorAll(".steps li").forEach((li, i) => {
     li.classList.toggle("done", i < step);
     if (i === step) li.setAttribute("aria-current", "step");
@@ -49,6 +56,9 @@ async function start() {
     register(name, BUILT[name] || placeholder(name));
   }
   init(state, { changed: markStep });
+  document.querySelectorAll(".top-links [data-open]").forEach((b) => b.addEventListener("click", () => {
+    if (state.status) go(b.dataset.open);
+  }));
   messagesFromUrl();
   try {
     state.status = await get("/api/status");

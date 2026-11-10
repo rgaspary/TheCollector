@@ -3,6 +3,8 @@
 ## 2.0.0 (unreleased)
 
 ### Added
+- Settings screen (header link): change the music library, set up, change or disconnect each music service's key or login, and set the default folders for playlists and missing-song lists.
+- Help screen (header link, and "Step-by-step guide" on each set-up screen): how to get a Spotify Client ID and a YouTube Data API key, plus answers to common questions.
 - Browse… buttons next to the playlist and missing-list folders. They open your desktop's own folder picker: the KDE or GNOME dialog through the desktop portal on Linux (or kdialog / zenity), the folder dialog on Windows, and Finder's on macOS.
 - A folder field on the Missing step, so the missing-songs list can be saved anywhere.
 - Rockbox (iPods and other players running Rockbox) in the Export step's app list. It picks M3U8 with paths relative to the playlist, and explains how to copy the music and playlist so the paths still work on the player.

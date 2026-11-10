@@ -16,7 +16,13 @@
 <body>
 <main>
   <header>
-    <h1><img src="/static/icon.svg" alt="" class="logo">TheCollector <span id="version" class="version"></span></h1>
+    <div class="title-row">
+      <h1><img src="/static/icon.svg" alt="" class="logo">TheCollector <span id="version" class="version"></span></h1>
+      <nav class="top-links" aria-label="Settings and help">
+        <button type="button" class="link" data-open="settings">Settings</button>
+        <button type="button" class="link" data-open="help">Help</button>
+      </nav>
+    </div>
     <p class="sub">Turn a streaming playlist into one your music app can play from your own files. Anything you don't have goes on a missing-songs list.</p>
     <p id="library-badge" class="account" hidden></p>
   </header>

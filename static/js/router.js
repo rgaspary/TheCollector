@@ -8,7 +8,8 @@ let lastTarget = null;  // the screen the newest queued call goes to
 let stateRef = null;
 let onChange = () => {};
 
-export const SCREENS = ["library", "source", "credentials", "link", "import", "review", "export", "missing", "done"];
+export const SCREENS = ["library", "source", "credentials", "link", "import", "review", "export", "missing", "done",
+  "settings", "help"];
 
 export function init(state, { changed } = {}) {
   stateRef = state;
