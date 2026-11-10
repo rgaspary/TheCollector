@@ -18,6 +18,7 @@
 - `[export] dir` setting and new `[library] type / path / folders` settings.
 
 ### Changed
+- Starting the app when it's already running opens the running copy instead of crashing. If another program has the port, a short message says so.
 - The page is now a series of steps (Library, Service, Playlist, Review, Export, Missing, Done) that slide left and right with a fade, or only fade when the system asks for reduced motion.
 - New JSON API for the step-by-step screens: library choice and test, sources and saved logins (set up, test, disconnect), analyze any source, resolve, export playlist and missing tracks, and show a saved file's folder.
 - Songs from playlists without album names (YouTube Music) are no longer marked "Different album", so they can match exactly.
