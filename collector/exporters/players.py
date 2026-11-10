@@ -16,6 +16,7 @@ class Player:
     recommended: str             # key in PLAYLIST_FORMATS
     also: list[str] = field(default_factory=list)
     steps: str = ""
+    path_style: str = "absolute"   # how the Export screen starts: "absolute", "relative" or "name"
 
 
 PLAYERS: dict[str, Player] = {p.key: p for p in (
@@ -35,6 +36,12 @@ PLAYERS: dict[str, Player] = {p.key: p for p in (
            "Drag the file into the Library, or double-click it to open it in Windows Media Player."),
     Player("media_player", "Media Player (Windows 11)", "media-player.svg", {"win32"}, "m3u", ["wpl"],
            "Right-click the file, choose Open with → Media Player."),
+    Player("rockbox", "Rockbox", "rockbox.svg", ALL, "m3u8", ["m3u"],
+           "Copy your music to the player with the same folder layout (~/Music/Artist/… becomes "
+           "/Music/Artist/…), then copy the playlist to the same place relative to the music: if you saved it "
+           "in your music folder's Playlists folder, put it in /Music/Playlists. In Rockbox, open it from Files "
+           "or Playlists.",
+           path_style="relative"),
     Player("other", "Other / not sure", "folder.svg", ALL, "m3u8",
            ["m3u", "pls", "xspf", "itunes_xml", "wpl", "csv", "json"],
            "Most music players open M3U8 files. Look for Open, Import or Load playlist, or drag the file in."),

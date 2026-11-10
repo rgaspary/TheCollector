@@ -3,6 +3,7 @@
 ## 2.0.0 (unreleased)
 
 ### Added
+- Rockbox (iPods and other players running Rockbox) in the Export step's app list. It picks M3U8 with paths relative to the playlist, and explains how to copy the music and playlist so the paths still work on the player.
 - A warning on the Library and Review steps when Strawberry's library is missing music files that are in its folders (Strawberry hasn't rescanned), with how to fix it.
 - Export, Missing and Done steps: pick the app you'll open the playlist in (its best format is ticked and its import steps shown), save the missing songs as a file and/or into the NextUp note, then open the folder or the note from the Done screen.
 - Playlist and Review steps: paste a link from the chosen service (a link from another service offers to switch), then decide close matches one by one or all at once. Last time's choices are pre-selected.

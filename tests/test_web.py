@@ -185,7 +185,9 @@ class Task16(ApiTest):
     def test_players(self):
         status, data = self.get("/api/players")
         self.assertEqual(data["default"], "strawberry")
-        self.assertEqual(len(data["players"]), 9)
+        self.assertEqual(len(data["players"]), 10)
+        rockbox = next(p for p in data["players"] if p["key"] == "rockbox")
+        self.assertEqual(rockbox["path_style"], "relative")
         self.assertIn("m3u8", [f["key"] for f in data["formats"]])
         self.assertEqual([f["key"] for f in data["missing_formats"]], ["json", "csv", "md", "txt"])
 

@@ -7,7 +7,7 @@ import { arrowKeys, busy, esc, iconHTML, showError } from "../ui.js";
 const LAST_PLAYER = "thecollector.player";
 const STYLES = [
   ["absolute", "Full paths", "Works on this computer."],
-  ["relative", "Relative to the folder", "Works if you copy the music and the playlist to another computer together."],
+  ["relative", "Relative to the folder", "Works if you copy the music and the playlist to another computer or a portable player together."],
   ["name", "File names only", "For players that look the files up themselves."],
 ];
 
@@ -22,6 +22,7 @@ function defaultFolder(state, player) {
 function pickPlayer(state, key) {
   const player = info.players.find((p) => p.key === key);
   choice.player = key;
+  choice.style = player.path_style;
   choice.formats = new Set([player.recommended]);
   if (!choice.folderEdited) choice.folder = defaultFolder(state, key);
   try { localStorage.setItem(LAST_PLAYER, key); } catch { /* private mode */ }
@@ -51,7 +52,7 @@ function draw(el, state) {
 
   el.innerHTML = `<div class="card">
     <h2>Which app will you open this in?</h2>
-    <p class="muted">${state.resolved.matched} song${state.resolved.matched === 1 ? "" : "s"} from your library go into the playlist.</p>
+    <p class="muted">${state.resolved.matched} song${state.resolved.matched === 1 ? "" : "s"} from your library ${state.resolved.matched === 1 ? "goes" : "go"} into the playlist.</p>
     <div class="tiles players" role="radiogroup" aria-label="Music app">
       ${players.map((p) => `<button type="button" class="tile${p.key === choice.player ? " selected" : ""}" role="radio"
           aria-checked="${p.key === choice.player}" data-player="${esc(p.key)}">

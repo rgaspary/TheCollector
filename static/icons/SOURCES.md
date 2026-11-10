@@ -24,5 +24,6 @@ TheCollector instead, and the app's name does the identifying.
 | `apps/apple-music.svg`, `apps/itunes.svg` | Apple's Apple Music identity guidelines allow the icon only for linking to Apple Music content; there's no published iTunes icon. |
 | `apps/mediamonkey.svg`, `apps/winamp.svg` | No official press kit or usage terms found. |
 | `apps/wmp.svg`, `apps/media-player.svg` | Microsoft's trademark guidelines don't allow its product icons to be used without a license. |
+| `apps/rockbox.svg` | A plain music player; Rockbox publishes no icon for use in other apps. |
 | `apps/folder.svg` | A plain folder for "Music folder". |
 | `services/fake.svg` | The pretend test service (`COLLECTOR_FAKE_SOURCES=1`). |

@@ -10,7 +10,7 @@ from pathlib import Path
 
 from collector.exporters import PLAYLIST_FORMATS, ExportItem, export_playlist
 from collector.exporters.missing_formats import MISSING_FORMATS, export_missing
-from collector.exporters.players import PLAYERS, default_player
+from collector.exporters.players import ALL, PLAYERS, default_player
 from collector.playlist import format_path, path_to_uri, safe_filename
 from collector.tracks import LocalTrack, Playlist, SourceTrack
 
@@ -193,7 +193,7 @@ class ExportPlaylist(unittest.TestCase):
 class Players(unittest.TestCase):
     def test_every_player_format_exists(self):
         self.assertEqual(list(PLAYERS), ["itunes", "apple_music", "strawberry", "vlc", "mediamonkey", "winamp",
-                                         "wmp", "media_player", "other"])
+                                         "wmp", "media_player", "rockbox", "other"])
         for player in PLAYERS.values():
             self.assertIn(player.recommended, PLAYLIST_FORMATS, player.key)
             for key in player.also:
@@ -204,8 +204,18 @@ class Players(unittest.TestCase):
     def test_recommendations_match_spec(self):
         self.assertEqual({k: p.recommended for k, p in PLAYERS.items()}, {
             "itunes": "itunes_xml", "apple_music": "itunes_xml", "strawberry": "m3u8", "vlc": "xspf",
-            "mediamonkey": "m3u8", "winamp": "m3u8", "wmp": "wpl", "media_player": "m3u", "other": "m3u8"})
+            "mediamonkey": "m3u8", "winamp": "m3u8", "wmp": "wpl", "media_player": "m3u", "rockbox": "m3u8",
+            "other": "m3u8"})
         self.assertEqual(set(PLAYERS["other"].also), set(PLAYLIST_FORMATS) - {"m3u8"})
+
+    def test_rockbox_uses_relative_paths_everywhere(self):
+        rockbox = PLAYERS["rockbox"]
+        self.assertEqual((rockbox.name, rockbox.path_style, rockbox.platforms), ("Rockbox", "relative", ALL))
+        self.assertEqual(rockbox.also, ["m3u"])
+        self.assertIn("same folder layout", rockbox.steps)
+        self.assertTrue((Path(__file__).parent.parent / "static/icons/apps" / rockbox.icon).is_file())
+        others = {p.path_style for k, p in PLAYERS.items() if k != "rockbox"}
+        self.assertEqual(others, {"absolute"})
 
     def test_default_player(self):
         self.assertEqual(default_player("strawberry", "linux"), "strawberry")
