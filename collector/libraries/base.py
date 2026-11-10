@@ -29,6 +29,10 @@ class Library:
     def load(self, path: Path | None, folders: list[Path]) -> list[LocalTrack]:
         raise NotImplementedError
 
+    def warning(self, path: Path | None, folders: list[Path]) -> str:
+        """Something about this library the user should know before trusting the results, or ""."""
+        return ""
+
     def test(self, path: Path | None, folders: list[Path]) -> str:
         count = len(self.load(path, folders))
         return f"Found {count:,} track{'' if count == 1 else 's'}"

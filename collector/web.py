@@ -146,7 +146,10 @@ class App:
     def test_library(self, body: dict) -> dict:
         reader, path, folders = self._library_args(body)
         try:
-            return {"ok": True, "message": reader.test(path, folders)}
+            result = {"ok": True, "message": reader.test(path, folders)}
+            if warning := reader.warning(path, folders):
+                result["warning"] = warning
+            return result
         except LibraryError as e:
             return {"ok": False, "error": str(e), "fix": e.fix}
 
@@ -238,6 +241,10 @@ class App:
                                fix="Choose your music library again.") from None
         return reader.load(self.cfg.library_path, self.cfg.library_folders)
 
+    def library_warning(self) -> str:
+        reader = LIBRARIES.get(self.cfg.library_type)
+        return reader.warning(self.cfg.library_path, self.cfg.library_folders) if reader else ""
+
     def analyze(self, body: dict) -> dict:
         link = str(body.get("url", "")).strip()
         detected = detect(link)
@@ -284,6 +291,7 @@ class App:
             "playlist": {"name": playlist.name, "url": playlist.url, "count": len(results),
                          "source": playlist.source, "service": s.name},
             "library_count": len(library),
+            "library_warning": self.library_warning(),
             "tracks": tracks,
         }
 

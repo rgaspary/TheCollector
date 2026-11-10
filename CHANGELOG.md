@@ -3,6 +3,7 @@
 ## 2.0.0 (unreleased)
 
 ### Added
+- A warning on the Library and Review steps when Strawberry's library is missing music files that are in its folders (Strawberry hasn't rescanned), with how to fix it.
 - Export, Missing and Done steps: pick the app you'll open the playlist in (its best format is ticked and its import steps shown), save the missing songs as a file and/or into the NextUp note, then open the folder or the note from the Done screen.
 - Playlist and Review steps: paste a link from the chosen service (a link from another service offers to switch), then decide close matches one by one or all at once. Last time's choices are pre-selected.
 - Library and music-service tiles. Services show a "Set up" or "Needs attention" badge; the set-up and fix screens have an optional Test button that never saves, and Spotify adds a Connect button.

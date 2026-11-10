@@ -81,7 +81,7 @@ class FolderLibrary(Library):
         fresh: dict[str, list] = {}
         found: list[tuple[str, Tags]] = []
         for root in existing:
-            for file in _audio_files(root):
+            for file in audio_files(root):
                 key = str(file)
                 if key in fresh:
                     continue  # the same file reached through two folders
@@ -125,7 +125,7 @@ class FolderLibrary(Library):
             pass  # no cache just means a slower next scan
 
 
-def _audio_files(root: Path):
+def audio_files(root: Path):
     for dirpath, dirnames, filenames in os.walk(root, onerror=lambda e: None):
         dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
         for name in sorted(filenames):

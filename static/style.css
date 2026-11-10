@@ -141,6 +141,9 @@ ol.list li { padding: 2px 0; }
 .result.ok { color: var(--accent); font-weight: 600; }
 .result.bad { color: var(--bad); }
 .result.bad span { color: var(--text); }
+.library-warning { background: color-mix(in srgb, var(--warn) 12%, var(--card)); color: var(--text); font-weight: 400;
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); border-left: 4px solid var(--warn);
+  border-radius: 8px; padding: 10px 14px; margin: 12px 0 0; }
 .problem { background: color-mix(in srgb, var(--bad) 10%, var(--card)); border: 1px solid color-mix(in srgb, var(--bad) 40%, transparent);
   border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; }
 .problem b { color: var(--bad); }

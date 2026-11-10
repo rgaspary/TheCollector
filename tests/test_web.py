@@ -271,6 +271,20 @@ class Task17(ApiTest):
         self.assertEqual([t["status"] for t in data["tracks"]], ["exact", "close", "missing"])
         self.assertEqual(data["tracks"][0]["track"]["title"], "Creep")
         self.assertEqual(data["library_count"], 2)
+        self.assertEqual(data["library_warning"], "")
+
+    def test_analyze_passes_on_library_warning(self):
+        with mock.patch.object(web.App, "library_warning", lambda app: "Strawberry is behind."):
+            data = self.analyzed()
+        self.assertEqual(data["library_warning"], "Strawberry is behind.")
+
+    def test_library_test_passes_on_warning(self):
+        from collector.libraries.folder import FolderLibrary
+        music = Path(self.tmp.name) / "Music"
+        music.mkdir()
+        with mock.patch.object(FolderLibrary, "warning", lambda self, path, folders: "Behind."):
+            status, data = self.post("/api/library/test", {"id": "folder", "folders": [str(music)]})
+        self.assertEqual((status, data), (200, {"ok": True, "message": "Found 0 tracks", "warning": "Behind."}))
 
     def test_analyze_detects_source_from_link(self):
         self.ready_fake()

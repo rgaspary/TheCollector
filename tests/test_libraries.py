@@ -75,6 +75,67 @@ class Strawberry(unittest.TestCase):
         self.assertEqual(StrawberryLibrary().test(self.db, []), "Found 1 track")
 
 
+class StrawberryBehind(unittest.TestCase):
+    """Music files in Strawberry's folders that its library doesn't have yet."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        d = Path(self.tmp.name)
+        self.music = d / "Music"
+        for name in ("Known/a b.flac", "Known/Gone.mp3", "New/one.flac", "New/two.MP3", "New/cover.jpg",
+                     ".hidden/x.mp3"):
+            (self.music / name).parent.mkdir(parents=True, exist_ok=True)
+            (self.music / name).write_bytes(b"")
+        self.db = d / "strawberry.db"
+        con = sqlite3.connect(self.db)
+        con.execute("CREATE TABLE directories (path TEXT, subdirs INTEGER)")
+        con.execute("INSERT INTO directories VALUES (?, 0)", (str(self.music),))
+        con.execute("CREATE TABLE songs (title TEXT, artist TEXT, albumartist TEXT, album TEXT, "
+                    "length INTEGER, url TEXT, unavailable INTEGER DEFAULT 0)")
+        base = self.music.as_uri()
+        con.executemany("INSERT INTO songs VALUES (?,?,?,?,?,?,?)", [
+            ("A B", "X", "", "", 0, base + "/Known/a%20b.flac", 0),
+            ("Gone", "X", "", "", 0, base + "/Known/Gone.mp3", 1),  # marked unavailable, but it's there
+        ])
+        con.commit()
+        con.close()
+
+    def test_counts_files_strawberry_lacks(self):
+        self.assertEqual(StrawberryLibrary().files_not_in_library(self.db), 3)
+
+    def test_warning_names_the_count_and_the_fix(self):
+        warning = StrawberryLibrary().warning(self.db, [])
+        self.assertIn("3 music files", warning)
+        self.assertIn("Update", warning)
+        self.assertIn("Music folder", warning)
+
+    def test_no_warning_when_up_to_date(self):
+        con = sqlite3.connect(self.db)
+        base = self.music.as_uri()
+        con.execute("UPDATE songs SET unavailable = 0")
+        con.executemany("INSERT INTO songs (title, url) VALUES ('t', ?)",
+                        [(base + "/New/one.flac",), (base + "/New/two.MP3",)])
+        con.commit()
+        con.close()
+        self.assertEqual(StrawberryLibrary().files_not_in_library(self.db), 0)
+        self.assertEqual(StrawberryLibrary().warning(self.db, []), "")
+
+    def test_missing_folder_or_old_db_gives_no_warning(self):
+        con = sqlite3.connect(self.db)
+        con.execute("UPDATE directories SET path = ?", (str(self.music / "nope"),))
+        con.commit()
+        con.close()
+        self.assertEqual(StrawberryLibrary().warning(self.db, []), "")
+        old = Path(self.tmp.name) / "old.db"
+        sqlite3.connect(old).execute("CREATE TABLE songs (url TEXT)").connection.close()
+        self.assertEqual(StrawberryLibrary().warning(old, []), "")
+        self.assertEqual(StrawberryLibrary().warning(Path(self.tmp.name) / "none.db", []), "")
+
+    def test_other_libraries_have_no_warning(self):
+        self.assertEqual(FolderLibrary().warning(None, [self.music]), "")
+
+
 def itunes_library(tracks: dict) -> bytes:
     return plistlib.dumps({"Major Version": 1, "Tracks": tracks, "Playlists": []})
 

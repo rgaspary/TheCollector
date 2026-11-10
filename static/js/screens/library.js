@@ -117,7 +117,9 @@ async function draw(el, state) {
     try {
       const r = await post("/api/library/test", body(lib, d));
       result.className = `result ${r.ok ? "ok" : "bad"}`;
-      result.innerHTML = r.ok ? `✓ ${esc(r.message)}` : `${esc(r.error)}${r.fix ? `<br><span>${esc(r.fix)}</span>` : ""}`;
+      result.innerHTML = r.ok
+        ? `✓ ${esc(r.message)}${r.warning ? `<p class="library-warning">${esc(r.warning)}</p>` : ""}`
+        : `${esc(r.error)}${r.fix ? `<br><span>${esc(r.fix)}</span>` : ""}`;
     } catch (err) {
       result.className = "result bad";
       result.textContent = err.message;

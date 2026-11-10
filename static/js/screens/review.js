@@ -49,8 +49,9 @@ function draw(el, state) {
         <span class="chip ok"><b>${exact.length}</b> in your library</span>
         <span class="chip ask"><b>${close.length}</b> close match${close.length === 1 ? "" : "es"}</span>
         <span class="chip miss"><b>${missing.length}</b> missing</span>
-        <span class="chip">${a.library_count.toLocaleString()} songs in your library</span>
+        <span class="chip">${a.library_count.toLocaleString()} song${a.library_count === 1 ? "" : "s"} in your library</span>
       </div>
+      ${a.library_warning ? `<p class="library-warning">${esc(a.library_warning)}</p>` : ""}
       ${close.length ? `<h3>Close matches — pick one for each</h3>
         <div class="bulk"><button type="button" data-bulk="best">Use my best match for all</button>
           <button type="button" data-bulk="missing">Send all to missing</button></div>

@@ -1,13 +1,17 @@
 """Read the Strawberry music library."""
+import os
+import re
 import shutil
 import sqlite3
 import tempfile
+import unicodedata
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from .. import platform_paths
 from ..tracks import LocalTrack
 from .base import Library, LibraryError, require_file
+from .folder import audio_files
 
 NANOSEC_PER_SEC = 1_000_000_000
 
@@ -17,6 +21,13 @@ def url_to_path(url: str) -> str:
     if parsed.scheme != "file":
         return ""
     return unquote(parsed.path)
+
+
+def _same_path(path: str) -> str:
+    """A path in one spelling, so a path from a file:// URL matches the same file found on disk."""
+    if re.match(r"^/[A-Za-z]:", path):  # file:///C:/Music -> C:/Music
+        path = path[1:]
+    return unicodedata.normalize("NFC", os.path.normcase(os.path.normpath(path)))
 
 
 def copy_sqlite(db_path: Path, tmp: str) -> Path:
@@ -72,3 +83,31 @@ class StrawberryLibrary(Library):
                 path=path_str,
             ))
         return tracks
+
+    def files_not_in_library(self, db_path: Path) -> int:
+        """How many music files in Strawberry's folders its library doesn't list (it hasn't rescanned)."""
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                con = sqlite3.connect(copy_sqlite(db_path, tmp))
+                try:
+                    folders = [Path(row[0]) for row in con.execute("SELECT path FROM directories") if row[0]]
+                    known = {_same_path(url_to_path(row[0] or ""))
+                             for row in con.execute("SELECT url FROM songs WHERE unavailable = 0")}
+                finally:
+                    con.close()
+        except (sqlite3.Error, OSError):
+            return 0  # an older or unusual library file: nothing to compare against
+        on_disk = {_same_path(str(f)) for folder in folders if folder.is_dir() for f in audio_files(folder)}
+        return len(on_disk - known)
+
+    def warning(self, path: Path | None, folders: list[Path]) -> str:
+        db_path = path or self.detect()
+        if not db_path or not db_path.is_file():
+            return ""
+        count = self.files_not_in_library(db_path)
+        if not count:
+            return ""
+        files = f"{count:,} music file" + ("" if count == 1 else "s")
+        return (f"Strawberry hasn't added {files} from its music folders yet, so TheCollector can't see "
+                f"{'it' if count == 1 else 'them'}. Open Strawberry and choose Tools → Update collection, "
+                f"or pick Music folder as your library instead.")
