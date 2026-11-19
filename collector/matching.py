@@ -8,10 +8,7 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 
-from .tracks import LocalTrack
-from .tracks import SourceTrack
-
-SpotifyTrack = SourceTrack  # v1 name, kept for one release
+from .tracks import LocalTrack, SourceTrack
 
 MATCH_THRESHOLD = 0.92
 PARTIAL_THRESHOLD = 0.6
@@ -180,7 +177,7 @@ class Candidate:
 
 @dataclass
 class MatchResult:
-    spotify: SpotifyTrack
+    spotify: SourceTrack
     status: str  # "exact", "close" or "missing"
     candidates: list[Candidate] = field(default_factory=list)
 
@@ -218,7 +215,7 @@ def _grade(item: _Indexed, base: str, tags: set[str], album: str, cross_artist: 
     return Candidate(item.track, round(score, 2), exact=not reasons, reason="; ".join(reasons))
 
 
-def match_track(sp: SpotifyTrack, index: LibraryIndex) -> MatchResult:
+def match_track(sp: SourceTrack, index: LibraryIndex) -> MatchResult:
     base, tags = split_title(sp.title)
     album = normalize_album(sp.album)
 
@@ -244,6 +241,6 @@ def match_track(sp: SpotifyTrack, index: LibraryIndex) -> MatchResult:
     return MatchResult(sp, status, unique[:MAX_CANDIDATES])
 
 
-def match_playlist(tracks: list[SpotifyTrack], library: list[LocalTrack]) -> list[MatchResult]:
+def match_playlist(tracks: list[SourceTrack], library: list[LocalTrack]) -> list[MatchResult]:
     index = LibraryIndex(library)
     return [match_track(t, index) for t in tracks]

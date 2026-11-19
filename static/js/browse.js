@@ -1,10 +1,11 @@
 // The Browse… button next to a folder field: opens the desktop's own folder picker.
 import { post } from "./api.js";
-import { busy, showError } from "./ui.js";
+import { busy, esc, showError } from "./ui.js";
 
+// `value` is plain text; it's escaped here.
 export function folderRow(id, value) {
   return `<div class="folder-row">
-      <input type="text" id="${id}" class="wide" value="${value}" spellcheck="false">
+      <input type="text" id="${id}" class="wide" value="${esc(value)}" spellcheck="false">
       <button type="button" data-browse="${id}">Browse…</button>
     </div>`;
 }

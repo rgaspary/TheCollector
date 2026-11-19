@@ -4,10 +4,10 @@ import io
 import json
 import plistlib
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable
 
 from .. import __version__
 from ..playlist import PathStyle, format_path, path_to_uri
@@ -109,7 +109,7 @@ def write_itunes_xml(playlist: Playlist, items: list[ExportItem], folder: Path, 
         order.append({"Track ID": n})
     plist = {
         "Major Version": 1, "Minor Version": 1, "Application Version": "12.0",
-        "Date": datetime.now(timezone.utc).replace(microsecond=0, tzinfo=None),
+        "Date": datetime.now(UTC).replace(microsecond=0, tzinfo=None),
         "Features": 5, "Show Content Ratings": True,
         "Tracks": tracks,
         "Playlists": [{"Name": playlist.name, "Playlist ID": 1, "All Items": True, "Playlist Items": order}],
@@ -117,7 +117,8 @@ def write_itunes_xml(playlist: Playlist, items: list[ExportItem], folder: Path, 
     return plistlib.dumps(plist, sort_keys=False).decode("utf-8")
 
 
-def _mmss(seconds: int) -> str:
+def mmss(seconds: int) -> str:
+    """Seconds as m:ss, or "" when not known."""
     return f"{seconds // 60}:{seconds % 60:02d}" if seconds else ""
 
 
@@ -127,7 +128,7 @@ def write_csv(playlist: Playlist, items: list[ExportItem], folder: Path, style: 
     w.writerow(["Title", "Artist", "Album", "Duration", "ISRC", "Path", "Source URL"])
     for it in items:
         t = it.local
-        w.writerow([t.title, t.artist, t.album, _mmss(t.duration), it.source.isrc,
+        w.writerow([t.title, t.artist, t.album, mmss(t.duration), it.source.isrc,
                     format_path(t.path, folder, style), it.source.url])
     return out.getvalue()
 

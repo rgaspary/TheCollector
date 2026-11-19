@@ -64,7 +64,7 @@ export const missingScreen = {
       </fieldset>
       <div class="missing-folder" ${picked ? "" : "hidden"}>
         <label for="missing-folder">Save to folder</label>
-        ${folderRow("missing-folder", esc(folder))}
+        ${folderRow("missing-folder", folder)}
       </div>
       ${state.status.nextup_enabled ? `<label class="check nextup"><input type="checkbox" ${nextup ? "checked" : ""}>
         Also update my NextUp note (adds these songs, ticks off ones now in your library)</label>` : ""}

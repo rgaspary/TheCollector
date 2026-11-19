@@ -129,6 +129,16 @@ class SaveLibrary(unittest.TestCase):
         self.assertEqual((text.count("type ="), text.count("path ="), text.count("folders =")), (1, 1, 1))
         self.assertEqual(config.load(self.path).library_path, Path("/y.db"))
 
+    def test_hash_in_a_folder_name_keeps_the_lines_after_it(self):
+        # A "#" inside a string isn't a comment, so the array ends on its own line.
+        config.save_library("folder", None, [Path("/music/#1 hits")], self.path)
+        config.save_library("folder", None, [Path("/music/#1 hits")], self.path)
+        text = self.path.read_text()
+        self.assertIn('playlist_dir = "~/Music/Playlists"', text)
+        self.assertIn("# Where built playlists go.", text)
+        self.assertEqual(text.count("folders ="), 1)
+        self.assertEqual(config.load(self.path).library_folders, [Path("/music/#1 hits")])
+
     def test_file_permissions_kept(self):
         self.path.chmod(0o640)
         config.save_library("folder", None, [], self.path)

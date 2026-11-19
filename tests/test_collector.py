@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from collector.matching import SpotifyTrack, match_playlist, split_title
+from collector.matching import match_playlist, split_title
 from collector.tracks import LocalTrack, Playlist, SourceTrack
 from collector.vault import task_line, write_missing_note
 
@@ -13,7 +13,7 @@ def local(i, title, artist, album, duration=200):
 
 
 def sp(i, title, artist, album, duration=200):
-    return SpotifyTrack(str(i), title, [artist], album, duration, f"https://open.spotify.com/track/{i}")
+    return SourceTrack(str(i), title, [artist], album, duration, f"https://open.spotify.com/track/{i}")
 
 
 LIBRARY = [

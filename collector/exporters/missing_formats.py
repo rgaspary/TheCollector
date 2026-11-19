@@ -5,14 +5,15 @@ The Markdown lines are the NextUp note's task lines (vault.task_line), so both r
 import csv
 import io
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Callable
 
 from ..playlist import safe_filename
 from ..tracks import Playlist, SourceTrack
 from ..vault import intro_line, note_title, task_line
+from .playlist_formats import mmss
 
 Writer = Callable[[Playlist, list[SourceTrack], str, date], str]
 
@@ -23,10 +24,6 @@ class MissingFormat:
     label: str
     ext: str
     write: Writer
-
-
-def _mmss(seconds: int) -> str:
-    return f"{seconds // 60}:{seconds % 60:02d}" if seconds else ""
 
 
 def write_md(playlist: Playlist, tracks: list[SourceTrack], service: str, today: date) -> str:
@@ -44,7 +41,7 @@ def write_csv(playlist: Playlist, tracks: list[SourceTrack], service: str, today
     w = csv.writer(out, lineterminator="\r\n")
     w.writerow(["Title", "Artist", "Album", "Duration", "ISRC", "URL"])
     for t in tracks:
-        w.writerow([t.title, t.artist, t.album, _mmss(t.duration), t.isrc, t.url])
+        w.writerow([t.title, t.artist, t.album, mmss(t.duration), t.isrc, t.url])
     return out.getvalue()
 
 

@@ -122,6 +122,12 @@ class Portal(unittest.TestCase):
 
 
 class Commands(unittest.TestCase):
+    def setUp(self):
+        # Whether tkinter is installed depends on the machine; pin it so the lists below are exact.
+        p = mock.patch("importlib.util.find_spec", return_value=None)
+        p.start()
+        self.addCleanup(p.stop)
+
     def which(self, *found):
         return lambda name: f"/usr/bin/{name}" if name in found else None
 
@@ -136,6 +142,11 @@ class Commands(unittest.TestCase):
                                     self.which("kdialog", "zenity", "yad"))
         self.assertEqual([c[0] for c in cmds], ["zenity", "kdialog", "yad"])
         self.assertIn("--directory", cmds[0])
+
+    def test_tkinter_is_the_last_resort(self):
+        with mock.patch("importlib.util.find_spec", return_value=object()):
+            cmds = fp.fallback_commands(Path("/m"), "linux", {}, self.which("zenity"))
+        self.assertEqual([c[0] for c in cmds], ["zenity", fp.sys.executable])
 
     def test_windows_and_mac(self):
         self.assertEqual(fp.fallback_commands(Path("C:/m"), "win32", {}, self.which())[0][0], "powershell")

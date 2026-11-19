@@ -8,13 +8,12 @@ checked against a real MM5.DB yet (plan Task 1, step 4b).
 """
 import re
 import sqlite3
-import tempfile
 from pathlib import Path
 
 from .. import platform_paths
 from ..tracks import LocalTrack
 from .base import Library, LibraryError, require_file
-from .strawberry import copy_sqlite
+from .strawberry import open_copy
 
 FIX = "Pick MediaMonkey's library file: MM5.DB (MediaMonkey 5) or MM.DB (MediaMonkey 4) in its AppData folder."
 
@@ -30,7 +29,7 @@ def _drive(letter_number) -> str:
 
 def full_path(song_path: str, drive_number) -> str:
     """Songs on fixed drives are stored as ':\\Music\\a.mp3'; the letter comes from Medias.DriveLetter."""
-    if song_path.startswith(":\\") or song_path.startswith(":/"):
+    if song_path.startswith((":\\", ":/")):
         letter = _drive(drive_number)
         return f"{letter}{song_path}" if letter else ""
     if re.match(r"^[A-Za-z]:[\\/]", song_path) or song_path.startswith(("\\\\", "/")):
@@ -56,24 +55,20 @@ class MediaMonkeyLibrary(Library):
     def load(self, path: Path | None, folders: list[Path]) -> list[LocalTrack]:
         db_path = require_file(path or self.detect(), "MediaMonkey library file", fix=FIX)
         try:
-            with tempfile.TemporaryDirectory() as tmp:
-                con = sqlite3.connect(copy_sqlite(db_path, tmp))
-                try:
-                    con.create_collation("IUNICODE", casefold_compare)
-                    tables = {r[0].lower() for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-                    if "songs" not in tables:
-                        raise LibraryError("That file isn't a MediaMonkey library.", fix=FIX)
-                    columns = {r[1].lower() for r in con.execute("PRAGMA table_info(Songs)")}
-                    album_artist = "s.AlbumArtist" if "albumartist" in columns else "''"
-                    join = ("LEFT JOIN Medias m ON m.IDMedia = s.IDMedia" if "medias" in tables else "")
-                    drive = "m.DriveLetter" if join else "NULL"
-                    rows = con.execute(
-                        f"""SELECT s.ID, s.SongTitle, s.Artist, {album_artist}, s.Album, s.SongLength,
-                                   s.SongPath, {drive}
-                            FROM Songs s {join}"""
-                    ).fetchall()
-                finally:
-                    con.close()
+            with open_copy(db_path) as con:
+                con.create_collation("IUNICODE", casefold_compare)
+                tables = {r[0].lower() for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                if "songs" not in tables:
+                    raise LibraryError("That file isn't a MediaMonkey library.", fix=FIX)
+                columns = {r[1].lower() for r in con.execute("PRAGMA table_info(Songs)")}
+                album_artist = "s.AlbumArtist" if "albumartist" in columns else "''"
+                join = ("LEFT JOIN Medias m ON m.IDMedia = s.IDMedia" if "medias" in tables else "")
+                drive = "m.DriveLetter" if join else "NULL"
+                rows = con.execute(
+                    f"""SELECT s.ID, s.SongTitle, s.Artist, {album_artist}, s.Album, s.SongLength,
+                               s.SongPath, {drive}
+                        FROM Songs s {join}"""
+                ).fetchall()
         except sqlite3.DatabaseError as e:
             raise LibraryError(f"Couldn't read the MediaMonkey library ({e}).", fix=FIX) from e
 

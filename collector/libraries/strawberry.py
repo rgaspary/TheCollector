@@ -1,14 +1,15 @@
 """Read the Strawberry music library."""
 import os
-import re
 import shutil
 import sqlite3
 import tempfile
 import unicodedata
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
-from urllib.parse import unquote, urlparse
 
 from .. import platform_paths
+from ..itunes_xml import location_to_path
 from ..tracks import LocalTrack
 from .base import Library, LibraryError, require_file
 from .folder import audio_files
@@ -17,16 +18,12 @@ NANOSEC_PER_SEC = 1_000_000_000
 
 
 def url_to_path(url: str) -> str:
-    parsed = urlparse(url)
-    if parsed.scheme != "file":
-        return ""
-    return unquote(parsed.path)
+    """A song's file:// URL as a path ("" for streams). file:///C:/a.mp3 becomes C:/a.mp3 on Windows."""
+    return location_to_path(url)
 
 
 def _same_path(path: str) -> str:
     """A path in one spelling, so a path from a file:// URL matches the same file found on disk."""
-    if re.match(r"^/[A-Za-z]:", path):  # file:///C:/Music -> C:/Music
-        path = path[1:]
     return unicodedata.normalize("NFC", os.path.normcase(os.path.normpath(path)))
 
 
@@ -39,6 +36,17 @@ def copy_sqlite(db_path: Path, tmp: str) -> Path:
         if side.exists():
             shutil.copy2(side, copy.with_name(copy.name + suffix))
     return copy
+
+
+@contextmanager
+def open_copy(db_path: Path) -> Iterator[sqlite3.Connection]:
+    """A connection to a temporary copy of the database, removed again afterwards."""
+    with tempfile.TemporaryDirectory() as tmp:
+        con = sqlite3.connect(copy_sqlite(db_path, tmp))
+        try:
+            yield con
+        finally:
+            con.close()
 
 
 class StrawberryLibrary(Library):
@@ -56,15 +64,11 @@ class StrawberryLibrary(Library):
         db_path = require_file(path or self.detect(), "Strawberry's library file",
                                fix="Open Strawberry once so it creates its library, or pick the file yourself.")
         try:
-            with tempfile.TemporaryDirectory() as tmp:
-                con = sqlite3.connect(copy_sqlite(db_path, tmp))
-                try:
-                    rows = con.execute(
-                        """SELECT rowid, title, artist, albumartist, album, length, url FROM songs
-                           WHERE unavailable = 0 AND title IS NOT NULL AND title != ''"""
-                    ).fetchall()
-                finally:
-                    con.close()
+            with open_copy(db_path) as con:
+                rows = con.execute(
+                    """SELECT rowid, title, artist, albumartist, album, length, url FROM songs
+                       WHERE unavailable = 0 AND title IS NOT NULL AND title != ''"""
+                ).fetchall()
         except sqlite3.DatabaseError as e:
             raise LibraryError(f"Couldn't read Strawberry's library ({e}).",
                                fix="Check that the file is Strawberry's strawberry.db.") from e
@@ -87,14 +91,10 @@ class StrawberryLibrary(Library):
     def files_not_in_library(self, db_path: Path) -> int:
         """How many music files in Strawberry's folders its library doesn't list (it hasn't rescanned)."""
         try:
-            with tempfile.TemporaryDirectory() as tmp:
-                con = sqlite3.connect(copy_sqlite(db_path, tmp))
-                try:
-                    folders = [Path(row[0]) for row in con.execute("SELECT path FROM directories") if row[0]]
-                    known = {_same_path(url_to_path(row[0] or ""))
-                             for row in con.execute("SELECT url FROM songs WHERE unavailable = 0")}
-                finally:
-                    con.close()
+            with open_copy(db_path) as con:
+                folders = [Path(row[0]) for row in con.execute("SELECT path FROM directories") if row[0]]
+                known = {_same_path(url_to_path(row[0] or ""))
+                         for row in con.execute("SELECT url FROM songs WHERE unavailable = 0")}
         except (sqlite3.Error, OSError):
             return 0  # an older or unusual library file: nothing to compare against
         on_disk = {_same_path(str(f)) for folder in folders if folder.is_dir() for f in audio_files(folder)}

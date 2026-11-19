@@ -45,7 +45,7 @@ class ItunesLibrary(Library):
                                fix=FIX)
 
         tracks = []
-        for n, (key, t) in enumerate(entries.items()):
+        for n, t in enumerate(entries.values()):
             if not isinstance(t, dict) or any(t.get(flag) for flag in SKIP_FLAGS):
                 continue
             if t.get("Track Type") in ("URL", "Remote"):

@@ -90,16 +90,15 @@ class App:
         mtime = self._mtime()
         if mtime == self._config_mtime:
             return
-        self._config_mtime = mtime
         try:
-            new = config_mod.load(self.config_path)
+            self._reload_config()
         except Exception as e:  # half-saved or invalid file: keep the old settings
+            self._config_mtime = mtime  # and don't retry this version of the file on every request
             print(f"Couldn't reload config.toml, keeping the previous settings: {e}", flush=True)
             return
-        new.host, new.port = self.cfg.host, self.cfg.port  # the server is already bound to these
-        self.cfg = new
-        if new.legacy_spotify_client_id and not self.store.get("spotify").get("client_id"):
-            self.store.save("spotify", {"client_id": new.legacy_spotify_client_id})
+        client_id = self.cfg.legacy_spotify_client_id
+        if client_id and not self.store.get("spotify").get("client_id"):
+            self.store.save("spotify", {"client_id": client_id})
 
     # ---- status, libraries, players -----------------------------------------------------------
     def status(self) -> dict:
@@ -173,7 +172,7 @@ class App:
 
     def _reload_config(self) -> None:
         new = config_mod.load(self.config_path)
-        new.host, new.port = self.cfg.host, self.cfg.port
+        new.host, new.port = self.cfg.host, self.cfg.port  # the server is already bound to these
         self.cfg = new
         self._config_mtime = self._mtime()
 

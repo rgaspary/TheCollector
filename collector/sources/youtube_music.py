@@ -5,7 +5,6 @@ carry artist/title fields, so they're taken from the video title and the channel
 """
 import json
 import re
-import urllib.parse
 
 from .. import http
 from ..http import HttpError

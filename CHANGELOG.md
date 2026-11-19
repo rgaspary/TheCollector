@@ -34,3 +34,7 @@
 - NextUp is optional: without a `[vault]` section (or NextUp's config file) the app still runs.
 
 ### Removed
+
+### Fixed
+- Saving the music library no longer deletes the lines after `folders` in config.toml when a folder name contains `#`.
+- Strawberry on Windows: song paths no longer start with a stray slash (`/C:/…`), which broke exported playlists.

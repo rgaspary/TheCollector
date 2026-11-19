@@ -4,12 +4,11 @@ Kept in DATA_DIR/credentials.json, readable only by the user (mode 0600 where th
 The browser never gets secret values back: see public_view().
 """
 import json
-import os
-import tempfile
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from .config import DATA_DIR
+from .files import atomic_write
 from .sources.base import Source
 
 CREDENTIALS_FILE = DATA_DIR / "credentials.json"
@@ -79,15 +78,4 @@ class CredentialStore:
 
     # ---- file --------------------------------------------------------------------------
     def _write(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        text = json.dumps({"sources": self._values, "invalid": self._invalid}, indent=1)
-        fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=".credentials-", suffix=".tmp")
-        try:
-            if hasattr(os, "fchmod"):
-                os.fchmod(fd, 0o600)
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(text)
-            os.replace(tmp, self.path)
-        except BaseException:
-            Path(tmp).unlink(missing_ok=True)
-            raise
+        atomic_write(self.path, json.dumps({"sources": self._values, "invalid": self._invalid}, indent=1), 0o600)

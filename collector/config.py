@@ -2,12 +2,12 @@ import json
 import os
 import re
 import shutil
-import tempfile
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import platform_paths
+from .files import atomic_write
 
 ROOT = Path(__file__).resolve().parent.parent
 # COLLECTOR_CONFIG points at another file, e.g. to try the app without touching your settings.
@@ -111,6 +111,15 @@ def _toml_str(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)  # a JSON string is a valid TOML basic string
 
 
+def _is_complete(text: str) -> bool:
+    """True when `key = value` text is one whole TOML value (a "#" inside a string doesn't count)."""
+    try:
+        tomllib.loads(text)
+        return True
+    except tomllib.TOMLDecodeError:
+        return False
+
+
 def _save_table(table: str, keys: tuple[str, ...], new: list[str], config_path: Path) -> None:
     """Replace `keys` in config.toml's [table] with the `new` lines.
 
@@ -135,10 +144,11 @@ def _save_table(table: str, keys: tuple[str, ...], new: list[str], config_path: 
             if m and m.group(1) in keys:
                 if insert_at is None:
                     insert_at = len(kept)
-                value = m.group(2).split("#")[0].strip()
-                if value.startswith("[") and "]" not in value:  # multi-line array: skip to its end
-                    while i < end and "]" not in lines[i].split("#")[0]:
+                if m.group(2).startswith("["):  # an array may span lines: skip until the whole value parses
+                    text = line
+                    while i + 1 < end and not _is_complete(text):
                         i += 1
+                        text += "\n" + lines[i]
                 i += 1
                 continue
             kept.append(line)
@@ -150,14 +160,8 @@ def _save_table(table: str, keys: tuple[str, ...], new: list[str], config_path: 
         kept[insert_at:insert_at] = new
         lines = lines[:start + 1] + kept + lines[end:]
 
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    mode = config_path.stat().st_mode & 0o777 if config_path.exists() else 0o644
-    fd, tmp = tempfile.mkstemp(dir=config_path.parent, prefix=".config-", suffix=".tmp")
-    if hasattr(os, "fchmod"):
-        os.fchmod(fd, mode)  # keep the file's permissions (mkstemp makes it owner-only)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
-    os.replace(tmp, config_path)
+    mode = config_path.stat().st_mode & 0o777 if config_path.exists() else 0o644  # keep its permissions
+    atomic_write(config_path, "\n".join(lines) + "\n", mode)
 
 
 def save_library(lib_type: str, path: Path | None, folders: list[Path], config_path: Path = CONFIG_PATH) -> None:

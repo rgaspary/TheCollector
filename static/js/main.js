@@ -9,7 +9,7 @@ import { helpScreen } from "./screens/help.js";
 import { libraryScreen } from "./screens/library.js";
 import { linkScreen } from "./screens/link.js";
 import { missingScreen } from "./screens/missing.js";
-import { placeholder } from "./screens/placeholder.js";
+import { importPlaceholder } from "./screens/placeholder.js";
 import { reviewScreen } from "./screens/review.js";
 import { settingsScreen } from "./screens/settings.js";
 import { sourceScreen } from "./screens/source.js";
@@ -17,8 +17,9 @@ import { state } from "./state.js";
 import { $, showError, showNotice } from "./ui.js";
 
 const BUILT = {
-  library: libraryScreen, source: sourceScreen, credentials: credentialsScreen, link: linkScreen, review: reviewScreen,
-  export: exportScreen, missing: missingScreen, done: doneScreen, settings: settingsScreen, help: helpScreen,
+  library: libraryScreen, source: sourceScreen, credentials: credentialsScreen, link: linkScreen,
+  import: importPlaceholder, review: reviewScreen, export: exportScreen, missing: missingScreen, done: doneScreen,
+  settings: settingsScreen, help: helpScreen,
 };
 
 // Which step of the bar each screen belongs to. Settings and Help sit outside the steps.
@@ -53,7 +54,7 @@ async function start() {
     section.dataset.screen = name;
     section.hidden = true;
     $(".stage").append(section);
-    register(name, BUILT[name] || placeholder(name));
+    register(name, BUILT[name]);
   }
   init(state, { changed: markStep });
   document.querySelectorAll(".top-links [data-open]").forEach((b) => b.addEventListener("click", () => {

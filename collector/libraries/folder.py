@@ -7,11 +7,11 @@ only reads files that changed.
 import json
 import os
 import re
-import tempfile
 from dataclasses import asdict
 from pathlib import Path
 
 from .. import platform_paths
+from ..files import atomic_write
 from ..tracks import LocalTrack
 from .base import Library, LibraryError
 from .tags import Tags, read_tags
@@ -114,13 +114,8 @@ class FolderLibrary(Library):
         return {}
 
     def _write_cache(self, files: dict[str, list]) -> None:
-        path = self.cache_path
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".folder-index-", suffix=".tmp")
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump({"version": CACHE_VERSION, "files": files}, f, ensure_ascii=False)
-            os.replace(tmp, path)
+            atomic_write(self.cache_path, json.dumps({"version": CACHE_VERSION, "files": files}, ensure_ascii=False))
         except OSError:
             pass  # no cache just means a slower next scan
 

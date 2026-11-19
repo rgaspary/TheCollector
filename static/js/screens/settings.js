@@ -67,9 +67,9 @@ export const settingsScreen = {
         <h3>Where files are saved</h3>
         <p class="muted small">Where the Export and Missing steps start. You can still pick another folder each time.</p>
         <label for="set-playlist-dir">Playlists</label>
-        ${folderRow("set-playlist-dir", esc(state.status.playlist_dir))}
+        ${folderRow("set-playlist-dir", state.status.playlist_dir)}
         <label for="set-missing-dir">Missing-song lists</label>
-        ${folderRow("set-missing-dir", esc(state.status.missing_dir))}
+        ${folderRow("set-missing-dir", state.status.missing_dir)}
         <div class="result" aria-live="polite"></div>
         <button type="button" data-save-folders>Save folders</button>
       </section>

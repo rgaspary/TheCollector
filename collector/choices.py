@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 from .config import DATA_DIR
+from .files import atomic_write
 
 CHOICES_FILE = DATA_DIR / "choices.json"
 MISSING = "missing"
@@ -27,5 +28,4 @@ class Choices:
 
     def update(self, source: str, decisions: dict[str, str]):
         self.data.update({f"{source}:{tid}": pick for tid, pick in decisions.items()})
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self.data, indent=1))
+        atomic_write(self.path, json.dumps(self.data, indent=1))

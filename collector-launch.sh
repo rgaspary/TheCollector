@@ -73,7 +73,7 @@ EOF
         cat <&3 >/dev/null
       exec 3>&-
       for _ in $(seq 1 20); do running || break; sleep 0.25; done
-      running && notify "Couldn't stop TheCollector" || notify "Stopped"
+      if running; then notify "Couldn't stop TheCollector"; else notify "Stopped"; fi
     fi
     exit 0
     ;;

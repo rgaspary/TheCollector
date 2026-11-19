@@ -15,17 +15,12 @@ const STYLES = [
 let info = null;          // GET /api/players
 let choice = null;        // {player, formats:Set, style, folder, folderEdited, showAll}
 
-// Where playlists go unless the user picks another folder: the Playlists folder inside Music.
-function defaultFolder(state) {
-  return state.status.playlist_dir;
-}
-
 function pickPlayer(state, key) {
   const player = info.players.find((p) => p.key === key);
   choice.player = key;
   choice.style = player.path_style;
   choice.formats = new Set([player.recommended]);
-  if (!choice.folderEdited) choice.folder = defaultFolder(state);
+  if (!choice.folderEdited) choice.folder = state.status.playlist_dir;  // the default from Settings
   try { localStorage.setItem(LAST_PLAYER, key); } catch { /* private mode */ }
 }
 
@@ -77,7 +72,7 @@ function draw(el, state) {
     </fieldset>
 
     <label for="export-folder">Save to folder</label>
-    ${folderRow("export-folder", esc(choice.folder))}
+    ${folderRow("export-folder", choice.folder)}
 
     <div class="nav">
       <button type="button" data-back>Back</button>

@@ -50,6 +50,8 @@ class Strawberry(unittest.TestCase):
     def test_url_to_path(self):
         self.assertEqual(url_to_path("file:///home/gc/Music/a%20b/c.m4a"), "/home/gc/Music/a b/c.m4a")
         self.assertEqual(url_to_path("https://example.com/x.mp3"), "")
+        # Strawberry on Windows: no leading slash before the drive letter.
+        self.assertEqual(url_to_path("file:///C:/Users/a/Music/x%20y.flac"), "C:/Users/a/Music/x y.flac")
 
     def test_strawberry_loads_fixture_db(self):
         tracks = StrawberryLibrary().load(self.db, [])
