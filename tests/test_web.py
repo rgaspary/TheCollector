@@ -1,5 +1,6 @@
 """The HTTP API, tested against a real server on a free port with a fake music service."""
 import json
+import socket
 import tempfile
 import threading
 import unittest
@@ -244,6 +245,27 @@ class Task16(ApiTest):
         self.assertNotIn('"folder"', self.config_path.read_text())
         status, _ = self.post("/api/status", headers={"Origin": self.base})
         self.assertEqual(status, 404)  # same origin is let through (and this route only exists as GET)
+
+    def test_other_host_names_refused(self):
+        # DNS rebinding: a web page's own domain pointed at 127.0.0.1 is same-origin to the browser.
+        port = self.server.server_address[1]
+        evil = {"Host": f"evil.test:{port}"}
+        self.assertEqual(self.call("GET", "/api/status", headers=evil)[0], 403)
+        self.assertEqual(self.post("/api/library", {"id": "folder"}, headers={**evil, "Origin": f"http://evil.test:{port}"})[0], 403)
+        for host in (f"localhost:{port}", f"127.0.0.1:{port}", "127.0.0.1"):
+            self.assertEqual(self.call("GET", "/api/status", headers={"Host": host})[0], 200, host)
+
+    def test_network_wide_host_accepts_any_name(self):
+        self.app.cfg.host = "0.0.0.0"
+        status, _ = self.call("GET", "/api/status", headers={"Host": "my-pc.local:8766"})
+        self.assertEqual(status, 200)
+
+    def test_negative_content_length_answered_at_once(self):
+        port = self.server.server_address[1]
+        with socket.create_connection(("127.0.0.1", port), timeout=3) as s:
+            s.sendall(b"POST /api/resolve HTTP/1.0\r\nContent-Type: application/json\r\n"
+                      b"Content-Length: -1\r\n\r\n{}")
+            self.assertIn(b" 400 ", s.recv(1024))  # a timeout here means the server waited for more
 
     def test_v1_routes_are_gone(self):
         self.assertEqual(self.get("/login")[0], 404)

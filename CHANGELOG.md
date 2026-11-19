@@ -38,3 +38,5 @@
 ### Fixed
 - Saving the music library no longer deletes the lines after `folders` in config.toml when a folder name contains `#`.
 - Strawberry on Windows: song paths no longer start with a stray slash (`/C:/…`), which broke exported playlists.
+- Web pages can no longer read TheCollector's settings (folder paths, which services are set up) by pointing their own domain at 127.0.0.1 (DNS rebinding). Requests must name 127.0.0.1, localhost or the configured host.
+- A line break in a song, artist, album or playlist name no longer adds a stray task to the NextUp note or a stray entry to an exported playlist.

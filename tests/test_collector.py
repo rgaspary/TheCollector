@@ -87,6 +87,24 @@ class Matching(unittest.TestCase):
 MIX = Playlist("spotify", "p", "Mix", "https://p")
 
 
+class OneLine(unittest.TestCase):
+    def test_line_breaks_in_names_become_spaces(self):
+        t = SourceTrack("x", "Song\n- [ ] Not a task", ["A\r\nB"], "Al bum", 1, "")
+        self.assertEqual((t.title, t.artists, t.album), ("Song - [ ] Not a task", ["A B"], "Al bum"))
+        self.assertEqual(Playlist("s", "p", "Mix\n---", "").name, "Mix ---")
+        self.assertEqual(LocalTrack(1, "T\n", "  A  ", "B", 1, "/p").title, "T")
+        self.assertEqual(LocalTrack(1, "T", "  A  ", "B", 1, "/p").artist, "  A  ")  # untouched without a break
+
+    def test_note_gets_one_task_per_song(self):
+        with tempfile.TemporaryDirectory() as d:
+            playlist = Playlist("spotify", "p", "Mix\n# Heading", "")
+            r = write_missing_note(Path(d), "Music", "music", playlist, "Spotify",
+                                   [sp("a", "Song\n- [ ] Injected", "Band", "")], [], dt.date(2026, 1, 1))
+            text = r.path.read_text()
+        self.assertEqual(text.count("- [ ]"), 1)
+        self.assertNotIn("\n# Heading", text)
+
+
 class Note(unittest.TestCase):
     def test_create_merge_and_tick(self):
         a = sp("a", "Karma Police", "Radiohead", "OK Computer")

@@ -34,6 +34,7 @@ STATIC = config_mod.ROOT / "static"
 MAX_ANALYSES = 10
 MAX_BODY = 1024 * 1024
 PATH_STYLES = ("absolute", "relative", "name")
+WILDCARD_HOSTS = ("0.0.0.0", "::", "")  # [server] host values that listen on every network
 
 
 class ApiError(Exception):
@@ -454,15 +455,31 @@ def make_handler(app: App):
         def _redirect(self, url: str):
             self._send(HTTPStatus.FOUND, b"", "text/plain", {"Location": url})
 
+        def _local_hosts(self) -> set[str]:
+            """The host:port names this server is reached by."""
+            port = self.server.server_address[1]
+            names = {app.cfg.host, "127.0.0.1", "localhost"}
+            return {f"[{n}]:{port}" if ":" in n else f"{n}:{port}" for n in names}
+
+        def _known_host(self) -> bool:
+            """Refuse requests for other host names, so a web page can't read the API through DNS
+            rebinding (its own domain pointed at 127.0.0.1). Without a Host header it's not a browser."""
+            if app.cfg.host in WILDCARD_HOSTS:
+                return True  # served to the whole network on purpose: any name may reach it
+            host = self.headers.get("Host")
+            bare = {h.rsplit(":", 1)[0] for h in self._local_hosts()}  # port 80 drops the port
+            return host is None or host in self._local_hosts() or host in bare
+
         def _same_origin(self) -> bool:
             origin = self.headers.get("Origin")
-            port = self.server.server_address[1]
-            allowed = {f"http://{app.cfg.host}:{port}", f"http://localhost:{port}", f"http://127.0.0.1:{port}"}
+            allowed = {f"http://{h}" for h in self._local_hosts()}
             return (origin is None or origin in allowed) and \
                 self.headers.get("Content-Type", "").startswith("application/json")
 
         # ---- routes ----------------------------------------------------------------
         def do_GET(self):
+            if not self._known_host():
+                return self._send(403, b"Forbidden", "text/plain")
             app.reload_config_if_changed()
             url = urllib.parse.urlparse(self.path)
             path = url.path
@@ -510,6 +527,8 @@ def make_handler(app: App):
             return self._redirect("/?connected=spotify")
 
         def do_POST(self):
+            if not self._known_host():
+                return self._json({"error": "Forbidden"}, 403)
             app.reload_config_if_changed()
             if self.path == "/api/shutdown":
                 # Used by collector-launch.sh stop. Browsers always send Origin on POSTs from pages,
@@ -522,6 +541,8 @@ def make_handler(app: App):
                 return self._json({"error": "Forbidden"}, 403)
             try:
                 length = int(self.headers.get("Content-Length", "0"))
+                if length < 0:
+                    raise ValueError  # read(-1) would wait for the connection to close
                 if length > MAX_BODY:
                     return self._json({"error": "That request is too big."}, 413)
                 body = json.loads(self.rfile.read(length) or b"{}")
