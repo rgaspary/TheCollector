@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0.0 (unreleased)
+## 2.0.0 (2026-11-19)
 
 ### Added
 - Settings screen (header link): change the music library, set up, change or disconnect each music service's key or login, and set the default folders for playlists and missing-song lists.
