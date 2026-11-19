@@ -1,0 +1,5 @@
+{"kind": "youtube#videoListResponse",
+ "items": [
+  {"id": "vid1", "contentDetails": {"duration": "PT3M59S"}},
+  {"id": "vid3", "contentDetails": {"duration": "PT5M20S"}}
+ ]}

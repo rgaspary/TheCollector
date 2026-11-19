@@ -1,0 +1,11 @@
+{
+ "items": [
+  {"item": {"type": "track", "id": "t1", "name": "Black Hole Sun", "duration_ms": 320000,
+            "artists": [{"name": "Soundgarden"}], "album": {"name": "Superunknown"},
+            "external_urls": {"spotify": "https://open.spotify.com/track/t1"},
+            "external_ids": {"isrc": "USAM19400313"}}},
+  {"item": {"type": "episode", "id": "e1", "name": "A podcast"}},
+  {"item": null}
+ ],
+ "next": "https://api.spotify.com/v1/playlists/37i9dQZF1DXcBWIGoYBM5M/items?offset=50&limit=50"
+}

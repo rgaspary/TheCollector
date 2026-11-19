@@ -8,7 +8,7 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 
-from .library import LocalTrack
+from .tracks import LocalTrack, SourceTrack
 
 MATCH_THRESHOLD = 0.92
 PARTIAL_THRESHOLD = 0.6
@@ -136,20 +136,6 @@ def similarity(a: str, b: str) -> float:
 
 
 @dataclass
-class SpotifyTrack:
-    id: str
-    title: str
-    artists: list[str]
-    album: str
-    duration: int  # seconds
-    url: str
-
-    @property
-    def artist(self) -> str:
-        return ", ".join(self.artists)
-
-
-@dataclass
 class _Indexed:
     track: LocalTrack
     base: str
@@ -191,7 +177,7 @@ class Candidate:
 
 @dataclass
 class MatchResult:
-    spotify: SpotifyTrack
+    spotify: SourceTrack
     status: str  # "exact", "close" or "missing"
     candidates: list[Candidate] = field(default_factory=list)
 
@@ -224,12 +210,12 @@ def _grade(item: _Indexed, base: str, tags: set[str], album: str, cross_artist: 
     tag_reason = _describe_tags(tags, item.tags)
     if tag_reason:
         reasons.append(tag_reason)
-    if album != item.album:
+    if album and album != item.album:  # no album given (YouTube) means nothing to compare
         reasons.append(f"Different album: {item.track.album or 'unknown'}")
     return Candidate(item.track, round(score, 2), exact=not reasons, reason="; ".join(reasons))
 
 
-def match_track(sp: SpotifyTrack, index: LibraryIndex) -> MatchResult:
+def match_track(sp: SourceTrack, index: LibraryIndex) -> MatchResult:
     base, tags = split_title(sp.title)
     album = normalize_album(sp.album)
 
@@ -255,6 +241,6 @@ def match_track(sp: SpotifyTrack, index: LibraryIndex) -> MatchResult:
     return MatchResult(sp, status, unique[:MAX_CANDIDATES])
 
 
-def match_playlist(tracks: list[SpotifyTrack], library: list[LocalTrack]) -> list[MatchResult]:
+def match_playlist(tracks: list[SourceTrack], library: list[LocalTrack]) -> list[MatchResult]:
     index = LibraryIndex(library)
     return [match_track(t, index) for t in tracks]

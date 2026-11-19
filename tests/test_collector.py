@@ -3,11 +3,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from collector.library import LocalTrack, url_to_path
-from collector.matching import SpotifyTrack, match_playlist, split_title
-from collector.playlist import write_m3u8
-from collector.spotify import SpotifyError, parse_playlist_id
-from collector.vault import write_missing_note
+from collector.matching import match_playlist, split_title
+from collector.tracks import LocalTrack, Playlist, SourceTrack
+from collector.vault import task_line, write_missing_note
 
 
 def local(i, title, artist, album, duration=200):
@@ -15,7 +13,7 @@ def local(i, title, artist, album, duration=200):
 
 
 def sp(i, title, artist, album, duration=200):
-    return SpotifyTrack(str(i), title, [artist], album, duration, f"https://open.spotify.com/track/{i}")
+    return SourceTrack(str(i), title, [artist], album, duration, f"https://open.spotify.com/track/{i}")
 
 
 LIBRARY = [
@@ -73,31 +71,38 @@ class Matching(unittest.TestCase):
         self.assertEqual(r.status, "close")
         self.assertIn("Different album: Ten", r.candidates[0].reason)
 
+    def test_no_album_in_playlist_is_exact(self):
+        # YouTube Music gives no album, so the album can't count against a match.
+        r = self.match(sp(1, "Creep", "Radiohead", ""))
+        self.assertEqual(r.status, "exact")
+        r = self.match(sp(1, "Smells Like Teen Spirit", "Nirvana", ""))
+        self.assertEqual(r.status, "close")  # still the live version
+        self.assertNotIn("Different album", r.candidates[0].reason)
+
     def test_missing(self):
         self.assertEqual(self.match(sp(1, "Karma Police", "Radiohead", "OK Computer")).status, "missing")
         self.assertEqual(self.match(sp(1, "Totally Unknown", "Nobody", "Nothing")).status, "missing")
 
 
-class Files(unittest.TestCase):
-    def test_url_to_path(self):
-        self.assertEqual(url_to_path("file:///home/gc/Music/a%20b/c.m4a"), "/home/gc/Music/a b/c.m4a")
+MIX = Playlist("spotify", "p", "Mix", "https://p")
 
-    def test_parse_playlist_id(self):
-        pid = "37i9dQZF1DXcBWIGoYBM5M"
-        self.assertEqual(parse_playlist_id(f"https://open.spotify.com/playlist/{pid}?si=abc"), pid)
-        self.assertEqual(parse_playlist_id(f"https://open.spotify.com/intl-es/playlist/{pid}"), pid)
-        self.assertEqual(parse_playlist_id(f"spotify:playlist:{pid}"), pid)
-        with self.assertRaises(SpotifyError):
-            parse_playlist_id("https://open.spotify.com/album/xyz")
 
-    def test_m3u8(self):
+class OneLine(unittest.TestCase):
+    def test_line_breaks_in_names_become_spaces(self):
+        t = SourceTrack("x", "Song\n- [ ] Not a task", ["A\r\nB"], "Al bum", 1, "")
+        self.assertEqual((t.title, t.artists, t.album), ("Song - [ ] Not a task", ["A B"], "Al bum"))
+        self.assertEqual(Playlist("s", "p", "Mix\n---", "").name, "Mix ---")
+        self.assertEqual(LocalTrack(1, "T\n", "  A  ", "B", 1, "/p").title, "T")
+        self.assertEqual(LocalTrack(1, "T", "  A  ", "B", 1, "/p").artist, "  A  ")  # untouched without a break
+
+    def test_note_gets_one_task_per_song(self):
         with tempfile.TemporaryDirectory() as d:
-            path = write_m3u8("Road: Trip?", LIBRARY[:2], Path(d))
-            self.assertEqual(path.name, "Road Trip.m3u8")
-            lines = path.read_text().splitlines()
-            self.assertEqual(lines[0], "#EXTM3U")
-            self.assertEqual(lines[2], "#EXTINF:320,Soundgarden - Black Hole Sun")
-            self.assertEqual(lines[3], LIBRARY[0].path)
+            playlist = Playlist("spotify", "p", "Mix\n# Heading", "")
+            r = write_missing_note(Path(d), "Music", "music", playlist, "Spotify",
+                                   [sp("a", "Song\n- [ ] Injected", "Band", "")], [], dt.date(2026, 1, 1))
+            text = r.path.read_text()
+        self.assertEqual(text.count("- [ ]"), 1)
+        self.assertNotIn("\n# Heading", text)
 
 
 class Note(unittest.TestCase):
@@ -108,7 +113,7 @@ class Note(unittest.TestCase):
         today = dt.date(2026, 10, 28)
         with tempfile.TemporaryDirectory() as d:
             vault = Path(d)
-            r1 = write_missing_note(vault, "Music", "music", "Mix", "https://p", [a, b], [], today)
+            r1 = write_missing_note(vault, "Music", "music", MIX, "Spotify", [a, b], [], today)
             text = r1.path.read_text()
             self.assertEqual(r1.path.name, "Mix missing tracks.md")
             self.assertIn('project: "Mix missing tracks"', text)
@@ -119,7 +124,7 @@ class Note(unittest.TestCase):
             self.assertEqual(r1.added, 2)
 
             # Re-run: a is now owned, b still missing, c newly missing.
-            r2 = write_missing_note(vault, "Music", "music", "Mix", "https://p", [b, c], [a], today)
+            r2 = write_missing_note(vault, "Music", "music", MIX, "Spotify", [b, c], [a], today)
             self.assertEqual((r2.added, r2.ticked), (1, 1))
             text = r2.path.read_text()
             self.assertIn("- [x] Get \"Karma Police\"", text)
@@ -127,7 +132,7 @@ class Note(unittest.TestCase):
             self.assertEqual(text.count("open.spotify.com/track/b"), 1)
 
             # Third run with nothing new changes nothing.
-            r3 = write_missing_note(vault, "Music", "music", "Mix", "https://p", [b, c], [a], today)
+            r3 = write_missing_note(vault, "Music", "music", MIX, "Spotify", [b, c], [a], today)
             self.assertEqual((r3.added, r3.ticked), (0, 0))
 
     def test_older_note_gets_checklist_setting(self):
@@ -136,16 +141,61 @@ class Note(unittest.TestCase):
             folder.mkdir()
             note = folder / "Mix missing tracks.md"
             note.write_text('---\nproject: "Mix missing tracks"\narea: music\n---\n# Mix\n\n- [ ] Get "A" by B\n')
-            write_missing_note(Path(d), "Music", "music", "Mix", "https://p", [], [], dt.date.today())
+            write_missing_note(Path(d), "Music", "music", MIX, "Spotify", [], [], dt.date.today())
             text = note.read_text()
             self.assertIn("area: music\nchecklist: false\n---", text)
-            write_missing_note(Path(d), "Music", "music", "Mix", "https://p", [], [], dt.date.today())
+            write_missing_note(Path(d), "Music", "music", MIX, "Spotify", [], [], dt.date.today())
             self.assertEqual(note.read_text().count("checklist:"), 1)
 
     def test_no_note_when_nothing_missing(self):
         with tempfile.TemporaryDirectory() as d:
-            r = write_missing_note(Path(d), "Music", "music", "Mix", "https://p", [], [], dt.date.today())
+            r = write_missing_note(Path(d), "Music", "music", MIX, "Spotify", [], [], dt.date.today())
             self.assertIsNone(r.path)
+
+    def test_intro_names_the_service(self):
+        with tempfile.TemporaryDirectory() as d:
+            r = write_missing_note(Path(d), "Music", "music", MIX, "Spotify", [sp("a", "A", "B", "")], [])
+            self.assertIn("Tracks from [the Spotify playlist](https://p) that aren't in your library yet.",
+                          r.path.read_text())
+
+    def test_v1_spotify_note_still_merges(self):
+        a = sp("a", "Karma Police", "Radiohead", "OK Computer")
+        b = sp("b", "Creep", "Radiohead", "")
+        with tempfile.TemporaryDirectory() as d:
+            folder = Path(d) / "Music"
+            folder.mkdir()
+            note = folder / "Mix missing tracks.md"
+            note.write_text(
+                '---\nproject: "Mix missing tracks"\narea: music\nsource: https://p\ntags: [music]\n'
+                "checklist: false\n---\n# Mix missing tracks\n\n"
+                "Tracks from [the Spotify playlist](https://p) that aren't in your library yet.\n\n"
+                '- [ ] Get "Karma Police" by Radiohead (OK Computer) [Spotify](https://open.spotify.com/track/a)\n'
+                '- [x] Get "Creep" by Radiohead [Spotify](https://open.spotify.com/track/b) ✅ 2026-10-01\n')
+            r = write_missing_note(Path(d), "Music", "music", MIX, "Spotify", [a, b], [])
+            self.assertEqual((r.added, r.ticked), (0, 0))
+            r = write_missing_note(Path(d), "Music", "music", MIX, "Spotify", [b], [a], dt.date(2026, 11, 9))
+            self.assertEqual((r.added, r.ticked), (0, 1))
+            self.assertEqual(note.read_text().count("track/a"), 1)
+
+    def test_youtube_label(self):
+        yt = SourceTrack("v1", "Creep", ["Radiohead"], "", 239, "https://music.youtube.com/watch?v=v1")
+        playlist = Playlist("youtube_music", "PL1", "Mix", "https://music.youtube.com/playlist?list=PL1")
+        self.assertEqual(task_line(yt, "YouTube Music"),
+                         '- [ ] Get "Creep" by Radiohead [YouTube Music](https://music.youtube.com/watch?v=v1)')
+        with tempfile.TemporaryDirectory() as d:
+            r = write_missing_note(Path(d), "Music", "music", playlist, "YouTube Music", [yt], [])
+            text = r.path.read_text()
+            self.assertIn("[the YouTube Music playlist](https://music.youtube.com/playlist?list=PL1)", text)
+            self.assertTrue(text.rstrip().endswith("[YouTube Music](https://music.youtube.com/watch?v=v1)"))
+            again = write_missing_note(Path(d), "Music", "music", playlist, "YouTube Music", [yt], [])
+            self.assertEqual(again.added, 0)
+
+    def test_title_with_brackets_keeps_its_link_key(self):
+        t = sp("z", "Song [Live]", "Band", "")
+        with tempfile.TemporaryDirectory() as d:
+            write_missing_note(Path(d), "Music", "music", MIX, "Spotify", [t], [])
+            r = write_missing_note(Path(d), "Music", "music", MIX, "Spotify", [], [t], dt.date(2026, 11, 9))
+            self.assertEqual(r.ticked, 1)
 
 
 if __name__ == "__main__":

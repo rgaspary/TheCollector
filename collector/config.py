@@ -1,13 +1,19 @@
+import json
 import os
+import re
 import shutil
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import platform_paths
+from .files import atomic_write
+
 ROOT = Path(__file__).resolve().parent.parent
-CONFIG_PATH = ROOT / "config.toml"
+# COLLECTOR_CONFIG points at another file, e.g. to try the app without touching your settings.
+CONFIG_PATH = Path(os.environ.get("COLLECTOR_CONFIG") or ROOT / "config.toml").expanduser()
 EXAMPLE_PATH = ROOT / "config.example.toml"
-DATA_DIR = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "thecollector"
+DATA_DIR = platform_paths.data_dir()
 
 
 def _path(value: str) -> Path:
@@ -16,42 +22,160 @@ def _path(value: str) -> Path:
 
 @dataclass
 class Config:
-    client_id: str
-    strawberry_db: Path
-    playlist_dir: Path
-    vault_path: Path
-    vault_name: str
-    notes_folder: str
+    legacy_spotify_client_id: str
+    library_type: str
+    library_path: Path | None
+    library_folders: list[Path]
+    playlist_dir: Path   # where playlists are saved unless the user picks another folder
+    missing_dir: Path    # where missing-song lists are saved unless the user picks another folder
+    vault_path: Path | None
+    vault_name: str | None
+    notes_folder: str | None
     area: str
     host: str
     port: int
+    library_configured: bool = field(default=False)
 
     @property
     def redirect_uri(self) -> str:
         return f"http://{self.host}:{self.port}/callback"
 
+    @property
+    def nextup_enabled(self) -> bool:
+        return self.vault_path is not None and bool(self.notes_folder)
+
+    @property
+    def library_file(self) -> Path | None:
+        """The configured library file, or the usual location for this library type."""
+        return self.library_path or platform_paths.default_library_path(self.library_type)
+
+
+def _load_vault(raw: dict) -> tuple[Path | None, str | None, str | None]:
+    """Read the vault from NextUp's config. Missing section or file means NextUp isn't used."""
+    section = raw.get("vault") or {}
+    if not section.get("nextup_config"):
+        return None, None, None
+    nextup_path = _path(section["nextup_config"])
+    try:
+        with open(nextup_path, "rb") as f:
+            nextup = tomllib.load(f)
+        vault_path = Path(nextup["vault"]["path"]).expanduser()
+    except (OSError, KeyError, tomllib.TOMLDecodeError):
+        return None, None, None
+    if not vault_path.is_absolute():
+        vault_path = nextup_path.parent / vault_path
+    name = nextup["vault"].get("name", vault_path.name)
+    return vault_path, name, section.get("notes_folder", "Entertainment/Missing Tracks")
+
 
 def load(path: Path = CONFIG_PATH) -> Config:
     if path == CONFIG_PATH and not path.exists() and EXAMPLE_PATH.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(EXAMPLE_PATH, path)  # first run from a fresh clone
     with open(path, "rb") as f:
         raw = tomllib.load(f)
 
-    nextup_path = _path(raw["vault"]["nextup_config"])
-    with open(nextup_path, "rb") as f:
-        nextup = tomllib.load(f)
-    vault_path = Path(nextup["vault"]["path"]).expanduser()
-    if not vault_path.is_absolute():
-        vault_path = nextup_path.parent / vault_path
+    library = raw.get("library") or {}
+    lib_type = library.get("type") or "strawberry"
+    # v1 used [library] strawberry_db; v2 uses type + path.
+    lib_path = library.get("path") or (library.get("strawberry_db") if lib_type == "strawberry" else "")
+    folders = library.get("folders") or []
+    vault_path, vault_name, notes_folder = _load_vault(raw)
+    server = raw.get("server") or {}
+    export = raw.get("export") or {}
 
     return Config(
-        client_id=os.environ.get("SPOTIFY_CLIENT_ID") or raw["spotify"].get("client_id", ""),
-        strawberry_db=_path(raw["library"]["strawberry_db"]),
-        playlist_dir=_path(raw["library"]["playlist_dir"]),
+        legacy_spotify_client_id=os.environ.get("SPOTIFY_CLIENT_ID") or (raw.get("spotify") or {}).get("client_id", ""),
+        library_type=lib_type,
+        library_path=_path(lib_path) if lib_path else None,
+        library_folders=[_path(f) for f in folders],
+        library_configured="type" in library or "strawberry_db" in library,
+        # [library] playlist_dir is v1's name for the same setting.
+        playlist_dir=_path(export.get("playlist_dir") or library.get("playlist_dir")
+                           or str(platform_paths.music_dir() / "Playlists")),
+        missing_dir=_path(export.get("missing_dir") or str(platform_paths.documents_dir())),
         vault_path=vault_path,
-        vault_name=nextup["vault"].get("name", vault_path.name),
-        notes_folder=raw["vault"]["notes_folder"],
-        area=raw["vault"].get("area", "music"),
-        host=raw["server"].get("host", "127.0.0.1"),
-        port=int(raw["server"].get("port", 8766)),
+        vault_name=vault_name,
+        notes_folder=notes_folder,
+        area=(raw.get("vault") or {}).get("area", "music"),
+        host=server.get("host", "127.0.0.1"),
+        port=int(server.get("port", 8766)),
     )
+
+
+_TABLE = re.compile(r"^\s*\[\s*[A-Za-z0-9_.\-]+\s*\]\s*(#.*)?$")
+_LIBRARY_KEYS = ("type", "path", "folders", "strawberry_db")
+
+
+def _toml_str(value: str) -> str:
+    return json.dumps(value, ensure_ascii=False)  # a JSON string is a valid TOML basic string
+
+
+def _is_complete(text: str) -> bool:
+    """True when `key = value` text is one whole TOML value (a "#" inside a string doesn't count)."""
+    try:
+        tomllib.loads(text)
+        return True
+    except tomllib.TOMLDecodeError:
+        return False
+
+
+def _save_table(table: str, keys: tuple[str, ...], new: list[str], config_path: Path) -> None:
+    """Replace `keys` in config.toml's [table] with the `new` lines.
+
+    Comments, other keys and other tables stay as they were. The table is added if it's missing.
+    """
+    try:
+        lines = config_path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        lines = []
+
+    start = next((i for i, l in enumerate(lines) if re.match(rf"^\s*\[\s*{table}\s*\]", l)), None)
+    if start is None:
+        while lines and not lines[-1].strip():
+            lines.pop()
+        lines += ([""] if lines else []) + [f"[{table}]"] + new
+    else:
+        end = next((i for i in range(start + 1, len(lines)) if _TABLE.match(lines[i])), len(lines))
+        kept, insert_at, i = [], None, start + 1
+        while i < end:
+            line = lines[i]
+            m = re.match(r"^\s*([A-Za-z0-9_]+)\s*=\s*(.*)$", line)
+            if m and m.group(1) in keys:
+                if insert_at is None:
+                    insert_at = len(kept)
+                if m.group(2).startswith("["):  # an array may span lines: skip until the whole value parses
+                    text = line
+                    while i + 1 < end and not _is_complete(text):
+                        i += 1
+                        text += "\n" + lines[i]
+                i += 1
+                continue
+            kept.append(line)
+            i += 1
+        if insert_at is None:
+            insert_at = len(kept)
+            while insert_at and not kept[insert_at - 1].strip():  # before the blank lines that end the table
+                insert_at -= 1
+        kept[insert_at:insert_at] = new
+        lines = lines[:start + 1] + kept + lines[end:]
+
+    mode = config_path.stat().st_mode & 0o777 if config_path.exists() else 0o644  # keep its permissions
+    atomic_write(config_path, "\n".join(lines) + "\n", mode)
+
+
+def save_library(lib_type: str, path: Path | None, folders: list[Path], config_path: Path = CONFIG_PATH) -> None:
+    """Write the library choice into config.toml's [library] table (v1's strawberry_db goes)."""
+    _save_table("library", _LIBRARY_KEYS, [
+        f"type = {_toml_str(lib_type)}",
+        f"path = {_toml_str(str(path) if path else '')}",
+        "folders = [" + ", ".join(_toml_str(str(f)) for f in folders) + "]",
+    ], config_path)
+
+
+def save_folders(playlist_dir: Path, missing_dir: Path, config_path: Path = CONFIG_PATH) -> None:
+    """Write the default save folders into [export] (v2.0-dev's [export] dir goes)."""
+    _save_table("export", ("playlist_dir", "missing_dir", "dir"), [
+        f"playlist_dir = {_toml_str(str(playlist_dir))}",
+        f"missing_dir = {_toml_str(str(missing_dir))}",
+    ], config_path)

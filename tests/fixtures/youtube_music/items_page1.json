@@ -1,0 +1,13 @@
+{"kind": "youtube#playlistItemListResponse",
+ "nextPageToken": "P2",
+ "items": [
+  {"snippet": {"title": "Creep", "videoOwnerChannelTitle": "Radiohead - Topic", "position": 0,
+               "resourceId": {"kind": "youtube#video", "videoId": "vid1"}},
+   "contentDetails": {"videoId": "vid1"}},
+  {"snippet": {"title": "Deleted video", "position": 1,
+               "resourceId": {"kind": "youtube#video", "videoId": "vid2"}},
+   "contentDetails": {"videoId": "vid2"}},
+  {"snippet": {"title": "Soundgarden - Black Hole Sun (Official Music Video)", "videoOwnerChannelTitle": "SoundgardenVEVO", "position": 2,
+               "resourceId": {"kind": "youtube#video", "videoId": "vid3"}},
+   "contentDetails": {"videoId": "vid3"}}
+ ]}
