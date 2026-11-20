@@ -5,6 +5,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 from . import __version__
 
@@ -73,3 +74,32 @@ def request_json(method: str, url: str, *, headers: dict | None = None, params: 
         except ValueError as e:
             raise HttpError(200, "The server sent something that isn't JSON.") from e
     raise HttpError(429)  # not reached
+
+
+def download(url: str, dest: Path, *, allowed_hosts: tuple[str, ...], max_bytes: int = 50_000_000) -> None:
+    """Save a binary file to `dest`, refusing other hosts (after redirects) and oversized bodies.
+
+    A partial file is deleted on any failure.
+    """
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    try:
+        with opener(req, timeout=TIMEOUT) as resp:
+            # urllib follows redirects itself, so check where we actually ended up before saving anything.
+            if urllib.parse.urlsplit(resp.geturl()).hostname not in allowed_hosts:
+                raise HttpError(0, "Download came from an unexpected address.")
+            size = 0
+            with open(dest, "wb") as out:
+                while chunk := resp.read(64 * 1024):
+                    size += len(chunk)
+                    if size > max_bytes:
+                        raise HttpError(0, "Download is larger than expected.")
+                    out.write(chunk)
+    except HttpError:
+        dest.unlink(missing_ok=True)
+        raise
+    except urllib.error.HTTPError as e:
+        dest.unlink(missing_ok=True)
+        raise HttpError(e.code, e.read().decode(errors="replace")) from e
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        dest.unlink(missing_ok=True)
+        raise HttpError(0, str(getattr(e, "reason", e))) from e
