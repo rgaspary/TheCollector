@@ -6,12 +6,19 @@ const WAIT_FOR_RESTART_MS = 60000;
 let dialog = null;
 let info = null;
 let restarting = false;
+let installing = false;
 
 function readyLine() {
   const el = $("#update-badge");
   el.hidden = false;
   el.innerHTML = `TheCollector ${esc(info.latest)} is ready · <button type="button" class="link" id="update-restart">Restart to use it</button>`;
   $("#update-restart").onclick = restart;
+}
+
+// Put keyboard focus on the main button after the dialog's contents are swapped.
+function focusMain() {
+  const button = $("button.primary", dialog) || $("button", dialog);
+  if (button) button.focus();
 }
 
 function closeDialog() {
@@ -23,10 +30,10 @@ function open() {
   dialog = document.createElement("dialog");
   dialog.className = "update";
   dialog.setAttribute("aria-labelledby", "update-title");
-  // Escape does the same as the cross, and is ignored while the app is restarting.
+  // Escape does the same as the cross, and is ignored while updating or restarting.
   dialog.addEventListener("cancel", (e) => {
     e.preventDefault();
-    if (!restarting) dismiss();
+    if (!restarting && !installing) dismiss();
   });
   dialog.addEventListener("close", () => {
     dialog.remove();
@@ -37,6 +44,7 @@ function open() {
 }
 
 async function dismiss() {
+  if (restarting || installing) return;
   const box = $("#update-skip");
   if (box && box.checked) {
     try {
@@ -66,11 +74,14 @@ function notice(error = "") {
   $("#update-close", dialog).onclick = dismiss;
   const now = $("#update-now", dialog);
   if (now) now.onclick = () => install(now);
+  focusMain();
 }
 
 async function install(button) {
+  installing = true;
   button.disabled = true;
   button.textContent = "Updating…";
+  $("#update-close", dialog).disabled = true;
   try {
     // Pressing Update un-skips, so a failed try still offers itself next time.
     if ($("#update-skip", dialog).checked) await post("/api/update/skip", { version: "" });
@@ -80,8 +91,10 @@ async function install(button) {
       info = { ...info, ...(await get("/api/update")) };
     }
   } catch (err) {
+    installing = false;
     return notice(err.message);
   }
+  installing = false;
   if (info.state === "failed") return notice(info.error || "The update didn't finish. Please try again.");
   ready();
 }
@@ -100,6 +113,7 @@ function ready() {
     closeDialog();
     readyLine();
   };
+  focusMain();
 }
 
 async function restart() {
@@ -120,7 +134,11 @@ async function restart() {
       if (status.version === info.latest) return location.reload();
     } catch { /* the app is down for a moment while it restarts */ }
   }
-  dialog.innerHTML = `<h2 id="update-title">Restarting…</h2><p class="error">TheCollector didn't come back. Open it again from your app menu.</p>`;
+  restarting = false;  // nothing more will happen, so let Escape and the button close this
+  dialog.innerHTML = `<h2 id="update-title">Restarting…</h2><p class="error">TheCollector didn't come back. Open it again from your app menu.</p>
+    <button type="button" class="primary" id="update-gone">Close</button>`;
+  $("#update-gone", dialog).onclick = closeDialog;
+  focusMain();
 }
 
 export async function checkForUpdate() {
