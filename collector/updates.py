@@ -1,8 +1,15 @@
 """Checking for a newer TheCollector release, and the update state the app shows."""
+import gzip
 import json
+import posixpath
 import re
+import shutil
+import subprocess
+import sys
+import tarfile
 import threading
 import time
+import zlib
 from collections.abc import Callable
 from pathlib import Path
 
@@ -17,7 +24,17 @@ CHECK_EVERY = 24 * 3600
 KEEP = frozenset({"config.toml", "collector.log", ".update", ".git", ".venv"})
 GITHUB_HOSTS = ("api.github.com", "github.com", "codeload.github.com")
 
+# A release is a few MB; anything that unpacks to more than this is not one of ours (or is a zip bomb).
+MAX_UNPACKED = 500_000_000
+# filter="data" arrived in 3.11.4; before that we rely on our own checks alone.
+HAS_DATA_FILTER = hasattr(tarfile, "data_filter")
+
 _TAG = re.compile(r"v(\d+)\.(\d+)\.(\d+)")
+
+DAMAGED = "The download looks damaged. Try again later."
+NO_GITHUB = "Couldn't reach GitHub. Check your internet connection and try again."
+NO_SPACE = "Couldn't save the update. Check that there's free space on your disk and try again."
+GIT_CHECKOUT = "This copy is a git checkout. Update it with git."
 
 
 class UpdateError(Exception):
@@ -36,6 +53,106 @@ def parse_version(v: str) -> tuple[int, int, int]:
     return tuple(int(g) for g in nums.groups()) if nums else (0, 0, 0)
 
 
+def _escapes(path: str) -> bool:
+    """True when an archive path (already joined and normalised) points outside the folder."""
+    return path == ".." or path.startswith("../") or posixpath.isabs(path)
+
+
+def _check_members(members: list[tarfile.TarInfo]) -> str:
+    """Refuse anything that could write outside the folder, and return the one top-level folder's name."""
+    tops, total = set(), 0
+    for m in members:
+        if posixpath.isabs(m.name) or ".." in m.name.split("/") or m.isdev():
+            raise UpdateError(DAMAGED)
+        name = posixpath.normpath(m.name)
+        if m.issym():
+            # A symlink's target is relative to the folder the link sits in.
+            if posixpath.isabs(m.linkname) or _escapes(posixpath.normpath(
+                    posixpath.join(posixpath.dirname(name), m.linkname))):
+                raise UpdateError(DAMAGED)
+        elif m.islnk():
+            # A hard link's target is relative to the top of the archive.
+            if _escapes(posixpath.normpath(m.linkname)):
+                raise UpdateError(DAMAGED)
+        elif not (m.isfile() or m.isdir()):
+            raise UpdateError(DAMAGED)
+        total += m.size
+        if name != ".":
+            tops.add(name.split("/")[0])
+        if name in tops and not m.isdir():
+            raise UpdateError(DAMAGED)  # the top level must be a folder, not a file or link
+    if len(tops) != 1 or total > MAX_UNPACKED:
+        raise UpdateError(DAMAGED)
+    return tops.pop()
+
+
+def extract_release(tar_path: Path, dest: Path) -> Path:
+    """Unpack a release tarball into `dest` and return the single folder GitHub wraps it in.
+
+    Every member is checked before anything is written, so a bad archive leaves `dest` empty.
+    Disk errors are let through as OSError, since they mean something different to the person.
+    """
+    try:
+        with tarfile.open(tar_path, "r:gz") as tar:
+            members = tar.getmembers()
+            top = _check_members(members)
+            if HAS_DATA_FILTER:
+                tar.extractall(dest, filter="data")
+            else:
+                # Older 3.11 has no filter, so do its other job by hand: no setuid, no group/other write.
+                for m in members:
+                    m.mode &= 0o755
+                tar.extractall(dest)
+    except (tarfile.TarError, EOFError, zlib.error, gzip.BadGzipFile) as e:
+        raise UpdateError(DAMAGED) from e
+    folder = dest / top
+    if folder.is_symlink() or not folder.is_dir():
+        raise UpdateError(DAMAGED)
+    return folder
+
+
+def verify_staged(folder: Path, version: str) -> None:
+    """Make sure the unpacked copy is the version we asked for and that it actually imports."""
+    try:
+        init = (folder / "collector" / "__init__.py").read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as e:
+        raise UpdateError(DAMAGED) from e
+    if not re.search(rf'^__version__ = "{re.escape(version)}"$', init, re.MULTILINE):
+        raise UpdateError("The download isn't the version it should be. Try again later.")
+    # -I leaves this running copy's folder (and PYTHONPATH) off the path, and cwd + "." puts the staged
+    # copy on it, so it's the new code that has to import cleanly.
+    try:
+        done = subprocess.run(
+            [sys.executable, "-I", "-c", "import sys; sys.path.insert(0, '.'); import collector.web, collector.__main__"],
+            cwd=folder, timeout=60, capture_output=True, check=False)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise UpdateError("The new version didn't pass its start-up check. Try again later.") from e
+    if done.returncode != 0:
+        raise UpdateError("The new version didn't pass its start-up check. Try again later.")
+
+
+def _remove(path: Path) -> None:
+    """Delete a file or folder if it's there. Used for tidying up, so it never raises."""
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path, ignore_errors=True)
+    else:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _message(e: Exception) -> str:
+    """The plain sentence to show for a failed update."""
+    if isinstance(e, UpdateError):
+        return str(e)
+    if isinstance(e, http.HttpError):
+        return NO_GITHUB if e.status == 0 else "GitHub didn't send the update. Try again later."
+    if isinstance(e, OSError):
+        return NO_SPACE
+    return "Something went wrong while getting the update. Try again later."
+
+
 class Updater:
     """Knows the installed version, the newest release, and where an update stands."""
 
@@ -49,6 +166,7 @@ class Updater:
         self.state = "idle"
         self.error: str | None = None
         self.lock = threading.Lock()
+        self.thread: threading.Thread | None = None
 
     def _load(self) -> dict:
         try:
@@ -113,3 +231,51 @@ class Updater:
             data = self._load()
             data["skipped"] = version
             self._save(data)
+
+    def start_download(self) -> dict:
+        """Start fetching the latest release in the background, unless one is already on its way or ready."""
+        if (self.root / ".git").exists():
+            raise UpdateError(GIT_CHECKOUT)
+        with self.lock:
+            if self.state != "downloading" and self.ready_version() is None:
+                # Set here, not in the thread, so a second click straight after sees "downloading".
+                self.state, self.error = "downloading", None
+                self.thread = threading.Thread(target=self.stage, daemon=True)
+                self.thread.start()
+        return self.info()
+
+    def stage(self) -> None:
+        """Download, unpack and check the latest release, then mark it ready. Sets `state` and `error`.
+
+        The lock is only held to read and set state, so info() keeps answering during the download.
+        """
+        with self.lock:
+            latest = self._load().get("latest")
+            self.state, self.error = "downloading", None
+        work = self.root / ".update"
+        version = latest if isinstance(latest, str) and parse_tag("v" + latest) else None
+        tarball = work / f"download-{version}.tar.gz"
+        unpack = work / f"unpack-{version}"
+        staging = work / f"staging-{version}"
+        error = None
+        try:
+            if version is None or parse_tag("v" + version) <= parse_version(self.current):
+                raise UpdateError("There's no newer version to download.")
+            work.mkdir(exist_ok=True)
+            for leftover in (tarball, unpack, staging):  # from a run that was cut short
+                _remove(leftover)
+            http.download(TARBALL_URL.format(version=version), tarball, allowed_hosts=GITHUB_HOSTS)
+            unpack.mkdir()
+            extract_release(tarball, unpack).rename(staging)
+            verify_staged(staging, version)
+            atomic_write(work / "ready.json", json.dumps({"version": version, "folder": staging.name}))
+        except Exception as e:  # noqa: BLE001 - this runs in a thread, so every failure must land in `error`
+            if version is not None:
+                _remove(staging)
+            error = _message(e)
+        finally:
+            if version is not None:
+                _remove(tarball)
+                _remove(unpack)
+        with self.lock:
+            self.state, self.error = ("failed", error) if error else ("ready", None)

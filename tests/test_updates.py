@@ -1,5 +1,7 @@
 import io
 import json
+import os
+import tarfile
 import tempfile
 import unittest
 import urllib.error
@@ -7,7 +9,17 @@ from pathlib import Path
 from unittest import mock
 
 from collector import http, updates
-from collector.updates import CHECK_EVERY, LATEST_URL, Updater, parse_tag, parse_version
+from collector.updates import (
+    CHECK_EVERY,
+    LATEST_URL,
+    TARBALL_URL,
+    UpdateError,
+    Updater,
+    extract_release,
+    parse_tag,
+    parse_version,
+    verify_staged,
+)
 
 HTML_URL = "https://github.com/rgaspary/TheCollector/releases/tag/v2.1.0"
 
@@ -26,14 +38,69 @@ class FakeResponse:
         return False
 
 
+class StreamResponse:
+    """A download response: read in chunks, and says where the redirects ended up."""
+
+    def __init__(self, body: bytes, url: str):
+        self.stream = io.BytesIO(body)
+        self.url = url
+
+    def read(self, n=-1):
+        return self.stream.read(n)
+
+    def geturl(self):
+        return self.url
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+TOP = "rgaspary-TheCollector-abc123"
+
+
+def make_release(dir: Path, version: str, *, extra=None, broken=False) -> Path:
+    """A release tarball shaped like GitHub's: one top folder holding the app.
+
+    `extra` is a list of TarInfo (with optional bytes) to add as is, for unsafe members.
+    """
+    path = dir / f"release-{version}.tar.gz"
+    init = f'__version__ = "{version}"\n' + ("raise SystemExit(1)\n" if broken else "")
+    files = [("collector/__init__.py", init.encode(), 0o644), ("collector/web.py", b"", 0o644),
+             ("collector/__main__.py", b"", 0o644), ("collector-launch.sh", b"#!/bin/sh\n", 0o755)]
+    with tarfile.open(path, "w:gz") as tar:
+        for name in (TOP, f"{TOP}/collector"):
+            info = tarfile.TarInfo(name)
+            info.type, info.mode = tarfile.DIRTYPE, 0o755
+            tar.addfile(info)
+        for name, data, mode in files:
+            info = tarfile.TarInfo(f"{TOP}/{name}")
+            info.size, info.mode = len(data), mode
+            tar.addfile(info, io.BytesIO(data))
+        for info, data in extra or []:
+            tar.addfile(info, io.BytesIO(data) if data is not None else None)
+    return path
+
+
 class Opener:
-    """Answers the latest-release URL with `answer` (a dict or an exception) and counts calls."""
+    """Answers the latest-release URL with `answer` (a dict or an exception) and counts calls.
+
+    The tarball URL is answered with the bytes of `tarball` (or raises it, if it's an exception).
+    """
 
     def __init__(self, tag="v2.1.0"):
         self.answer = {"tag_name": tag, "html_url": HTML_URL}
         self.calls = 0
+        self.tarball: Path | Exception | None = None
 
     def __call__(self, req, timeout=None):
+        if req.full_url.startswith(TARBALL_URL.format(version="")):
+            if isinstance(self.tarball, Exception):
+                raise self.tarball
+            return StreamResponse(self.tarball.read_bytes(),
+                                  "https://codeload.github.com/rgaspary/TheCollector/legacy.tar.gz/v2.1.0")
         assert req.full_url == LATEST_URL
         self.calls += 1
         if isinstance(self.answer, Exception):
@@ -41,7 +108,9 @@ class Opener:
         return FakeResponse(json.dumps(self.answer).encode())
 
 
-class UpdaterTest(unittest.TestCase):
+class FakeGitHub(unittest.TestCase):
+    """An install folder, a state file and a fake GitHub behind http.opener."""
+
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -60,6 +129,8 @@ class UpdaterTest(unittest.TestCase):
     def make(self, current="2.0.0"):
         return Updater(self.root, self.state, current, lambda: self.now)
 
+
+class UpdaterTest(FakeGitHub):
     def test_parse(self):
         self.assertEqual(parse_tag("v2.1.0"), (2, 1, 0))
         self.assertIsNone(parse_tag("2.1.0"))
@@ -160,6 +231,195 @@ class UpdaterTest(unittest.TestCase):
     def test_constants(self):
         self.assertEqual(updates.TARBALL_URL.format(version="2.1.0"),
                          "https://api.github.com/repos/rgaspary/TheCollector/tarball/v2.1.0")
+
+
+def member(name, type=tarfile.REGTYPE, data=b"x", linkname=""):
+    info = tarfile.TarInfo(name)
+    info.type, info.linkname = type, linkname
+    if type == tarfile.REGTYPE:
+        info.size = len(data)
+        return info, data
+    return info, None
+
+
+class StageTest(FakeGitHub):
+    """Downloading, unpacking and checking a release."""
+
+    def setUp(self):
+        super().setUp()
+        self.work = self.root.parent / "work"
+        self.work.mkdir()
+
+    def staged(self):
+        return sorted(p.name for p in (self.root / ".update").glob("*")) if (self.root / ".update").exists() else []
+
+    def ready_updater(self, **release):
+        self.opener.tarball = make_release(self.work, release.pop("version", "2.1.0"), **release)
+        up = self.make()
+        up.info()  # sees 2.1.0 as the latest
+        return up
+
+    def test_stage_success(self):
+        up = self.ready_updater()
+        up.stage()
+        self.assertEqual(up.state, "ready")
+        self.assertIsNone(up.error)
+        self.assertEqual(up.ready_version(), "2.1.0")
+        self.assertEqual(json.loads((self.root / ".update" / "ready.json").read_text()),
+                         {"version": "2.1.0", "folder": "staging-2.1.0"})
+        launcher = self.root / ".update" / "staging-2.1.0" / "collector-launch.sh"
+        self.assertTrue(launcher.stat().st_mode & 0o111)
+        self.assertEqual(self.staged(), ["ready.json", "staging-2.1.0"])
+        self.assertEqual(up.info()["state"], "ready")
+
+    def test_unsafe_members_rejected(self):
+        bad = {
+            "dotdot": member("../evil"),
+            "absolute": member("/abs"),
+            "symlink out": member(f"{TOP}/link", tarfile.SYMTYPE, linkname="/etc/passwd"),
+            "relative symlink out": member(f"{TOP}/link", tarfile.SYMTYPE, linkname="../../evil"),
+            "hardlink out": member(f"{TOP}/hard", tarfile.LNKTYPE, linkname="../evil"),
+            "device": member(f"{TOP}/dev", tarfile.CHRTYPE),
+            "fifo": member(f"{TOP}/fifo", tarfile.FIFOTYPE),
+            "second top folder": member("other/file.txt"),
+        }
+        for label, (info, data) in bad.items():
+            with self.subTest(label):
+                case = self.work / label.replace(" ", "-")
+                case.mkdir()
+                tar = make_release(case, "2.1.0", extra=[(info, data)])
+                dest = case / "out" / "dest"
+                dest.mkdir(parents=True)
+                with self.assertRaises(UpdateError) as cm:
+                    extract_release(tar, dest)
+                self.assertEqual(str(cm.exception), "The download looks damaged. Try again later.")
+                self.assertEqual(sorted(p.name for p in case.iterdir()), ["out", tar.name])
+                self.assertEqual([p.name for p in (case / "out").iterdir()], ["dest"])
+                self.assertEqual(list(dest.iterdir()), [])
+        self.assertFalse(Path("/abs").exists())
+
+    def test_safe_release_extracts(self):
+        tar = make_release(self.work, "2.1.0", extra=[member(f"{TOP}/link", tarfile.SYMTYPE,
+                                                            linkname="collector/web.py")])
+        dest = self.work / "dest"
+        dest.mkdir()
+        top = extract_release(tar, dest)
+        self.assertEqual(top, dest / TOP)
+        self.assertTrue((top / "link").is_symlink())
+
+    def test_extracts_without_data_filter(self):
+        # Python before 3.11.4 has no filter="data": the hand checks must still guard it.
+        with mock.patch.object(updates, "HAS_DATA_FILTER", False):
+            dest = self.work / "dest"
+            dest.mkdir()
+            top = extract_release(make_release(self.work, "2.1.0"), dest)
+            self.assertTrue((top / "collector-launch.sh").stat().st_mode & 0o111)
+            bad = self.work / "bad"
+            bad.mkdir()
+            tar = make_release(bad, "2.1.0", extra=[member(f"{TOP}/link", tarfile.SYMTYPE, linkname="/etc/passwd")])
+            (bad / "dest").mkdir()
+            with self.assertRaises(UpdateError):
+                extract_release(tar, bad / "dest")
+            self.assertEqual(list((bad / "dest").iterdir()), [])
+
+    def test_not_a_tarball(self):
+        junk = self.work / "junk.tar.gz"
+        junk.write_bytes(b"not a tarball at all")
+        dest = self.work / "dest"
+        dest.mkdir()
+        with self.assertRaises(UpdateError):
+            extract_release(junk, dest)
+
+    def test_broken_release_not_staged(self):
+        # The version line is right, so only importing the staged copy (not this one) can fail it.
+        up = self.ready_updater(broken=True)
+        # Even with this running copy on PYTHONPATH, the check must import the staged one.
+        with mock.patch.dict(os.environ, {"PYTHONPATH": str(Path(updates.__file__).parents[1])}):
+            up.stage()
+        self.assertEqual(up.state, "failed")
+        self.assertEqual(up.error, "The new version didn't pass its start-up check. Try again later.")
+        self.assertIsNone(up.ready_version())
+        self.assertEqual(self.staged(), [])
+
+    def test_verify_imports_the_staged_copy(self):
+        dest = self.work / "dest"
+        dest.mkdir()
+        good = extract_release(make_release(self.work, "2.1.0"), dest)
+        verify_staged(good, "2.1.0")
+        (good / "collector" / "web.py").write_text("raise SystemExit(3)\n")
+        with self.assertRaises(UpdateError):
+            verify_staged(good, "2.1.0")
+
+    def test_wrong_version_not_staged(self):
+        up = self.ready_updater(version="2.0.9")
+        up.stage()
+        self.assertEqual(up.state, "failed")
+        self.assertEqual(up.error, "The download isn't the version it should be. Try again later.")
+        self.assertIsNone(up.ready_version())
+        self.assertEqual(self.staged(), [])
+
+    def test_network_error_message(self):
+        up = self.make()
+        up.info()
+        self.opener.tarball = urllib.error.URLError("no route")
+        up.stage()
+        self.assertEqual(up.state, "failed")
+        self.assertEqual(up.error, "Couldn't reach GitHub. Check your internet connection and try again.")
+        self.assertEqual(up.info()["error"], up.error)
+        self.assertEqual(self.staged(), [])
+
+    def test_unwritable_folder_fails_cleanly(self):
+        up = self.ready_updater()
+        with mock.patch.object(updates, "extract_release", side_effect=OSError(28, "No space left on device")):
+            up.stage()
+        self.assertEqual(up.state, "failed")
+        self.assertEqual(up.error, "Couldn't save the update. Check that there's free space on your disk and try again.")
+        self.assertEqual(self.staged(), [])
+
+    def test_git_checkout_refuses_download(self):
+        (self.root / ".git").mkdir()
+        up = self.ready_updater()
+        with self.assertRaises(UpdateError) as cm:
+            up.start_download()
+        self.assertEqual(str(cm.exception), "This copy is a git checkout. Update it with git.")
+        self.assertEqual(up.state, "idle")
+
+    def test_start_download_runs_in_background(self):
+        up = self.ready_updater()
+        info = up.start_download()
+        self.assertIn(info["state"], ("downloading", "ready"))
+        up.thread.join(30)
+        self.assertEqual(up.info()["state"], "ready")
+        self.assertEqual(up.ready_version(), "2.1.0")
+
+    def test_start_download_once_at_a_time(self):
+        up = self.ready_updater()
+        up.state = "downloading"
+        with mock.patch.object(updates.threading, "Thread") as thread:
+            self.assertEqual(up.start_download()["state"], "downloading")
+            thread.assert_not_called()
+        up.state = "idle"
+        up.stage()
+        with mock.patch.object(updates.threading, "Thread") as thread:
+            self.assertEqual(up.start_download()["state"], "ready")
+            thread.assert_not_called()
+
+    def test_retry_after_failure(self):
+        up = self.ready_updater()
+        self.opener.tarball, release = urllib.error.URLError("no route"), self.opener.tarball
+        up.stage()
+        self.assertEqual(up.state, "failed")
+        self.opener.tarball = release
+        up.stage()
+        self.assertEqual(up.state, "ready")
+        self.assertIsNone(up.error)
+
+    def test_nothing_newer_to_download(self):
+        self.opener.answer["tag_name"] = "v2.0.0"
+        up = self.ready_updater()
+        up.stage()
+        self.assertEqual(up.state, "failed")
+        self.assertIsNone(up.ready_version())
 
 
 if __name__ == "__main__":
