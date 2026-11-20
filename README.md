@@ -65,6 +65,10 @@ you've since got are ticked off.
 
 Tests: `python3 -m unittest discover tests`
 
+## Updates
+
+When a new version is out, TheCollector says so when it opens (it checks GitHub at most once a day). Press Update now and it downloads and checks the new version; then restart right away, or keep working and it switches over the next time you open it. Tick "Skip this version" to hide the notice until a newer one comes out. Updating replaces everything in TheCollector's folder except your settings file (config.toml), so don't keep your own files there. A copy installed with git is updated with git instead.
+
 ## Spotify limits
 
 Apps in Spotify's development mode may only be allowed to read playlists you own or collaborate on.

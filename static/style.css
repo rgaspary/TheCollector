@@ -223,3 +223,17 @@ fieldset.cards { display: grid; gap: 6px; }
 .help details { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin: 8px 0; }
 .help summary { cursor: pointer; font-weight: 600; }
 .help details p { margin: 8px 0 2px; line-height: 1.5; }
+
+/* Update popups */
+dialog.update { background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 10px;
+  max-width: 28rem; width: calc(100% - 32px); padding: 20px; }
+dialog.update::backdrop { background: rgba(0, 0, 0, .5); }
+dialog.update h2 { margin: 0 0 14px; font-size: 18px; }
+.update-versions { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0 0 16px; }
+.update-versions dt { color: var(--muted); }
+.update-versions dd { margin: 0; }
+.update-versions dd a { margin-left: 12px; }
+.update-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+.update-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; }
+.update-foot label { margin: 0; font-weight: normal; display: flex; gap: 8px; align-items: center; }
+.update-git { color: var(--muted); margin: 0; }

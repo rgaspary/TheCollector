@@ -28,6 +28,7 @@ from .sources import REGISTRY, CredentialError, SourceError, detect
 from .sources.base import Source
 from .sources.spotify import V1_TOKEN_FILE, migrate_v1
 from .tracks import LocalTrack, Playlist, SourceTrack
+from .updates import Updater, UpdateError
 from .vault import NoteResult, write_missing_note
 
 STATIC = config_mod.ROOT / "static"
@@ -71,6 +72,9 @@ class App:
     store: CredentialStore = field(default_factory=CredentialStore)
     choices: Choices = field(default_factory=Choices)
     v1_token_file: Path = V1_TOKEN_FILE
+    # Set by the restart button; main() re-runs the app once the server has shut down.
+    restart_requested: bool = False
+    updater: Updater = field(default_factory=Updater)
 
     def __post_init__(self):
         migrate_v1(self.store, self.cfg, self.v1_token_file)
@@ -409,6 +413,23 @@ class App:
         return {"note_path": str(note.path) if note.path else None, "note_added": note.added,
                 "note_ticked": note.ticked, "obsidian_url": obsidian}
 
+    def update_info(self) -> dict:
+        return self.updater.info()
+
+    def update_download(self, body: dict) -> dict:
+        try:
+            self.updater.start_download()
+        except UpdateError as e:
+            raise ApiError(409, {"error": str(e)}) from e
+        return self.updater.info()
+
+    def update_skip(self, body: dict) -> dict:
+        version = body.get("version")
+        if not isinstance(version, str):
+            raise ApiError(400, {"error": "Say which version to skip."})
+        self.updater.skip(version)
+        return self.updater.info()
+
     @staticmethod
     def choose_folder(body: dict) -> dict:
         try:
@@ -490,6 +511,8 @@ def make_handler(app: App):
                     return self._static(path[len("/static/"):])
                 if path == "/api/status":
                     return self._json(app.status())
+                if path == "/api/update":
+                    return self._json(app.update_info())
                 if path == "/api/libraries":
                     return self._json(app.libraries())
                 if path == "/api/players":
@@ -539,6 +562,11 @@ def make_handler(app: App):
                 return threading.Thread(target=self.server.shutdown, daemon=True).start()
             if not self._same_origin():
                 return self._json({"error": "Forbidden"}, 403)
+            if self.path == "/api/update/restart":
+                # main() re-runs the app once serve_forever returns and sees the flag.
+                app.restart_requested = True
+                self._json({"ok": True})
+                return threading.Thread(target=self.server.shutdown, daemon=True).start()
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 if length < 0:
@@ -575,6 +603,8 @@ def make_handler(app: App):
                 "/api/export/playlist": app.export_playlist,
                 "/api/export/missing": app.export_missing,
                 "/api/reveal": app.reveal,
+                "/api/update/download": app.update_download,
+                "/api/update/skip": app.update_skip,
             }
             if self.path in routes:
                 return routes[self.path](body)

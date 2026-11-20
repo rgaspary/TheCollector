@@ -1,8 +1,11 @@
 import base64
 import io
 import json
+import tempfile
 import unittest
 import urllib.error
+from http.client import IncompleteRead
+from pathlib import Path
 from unittest import mock
 
 from collector import http
@@ -99,6 +102,75 @@ class RequestJson(unittest.TestCase):
         opener.results = []
         with mock.patch.object(http, "opener", lambda req, timeout=None: FakeResponse(b"")):
             self.assertEqual(http.request_json("GET", "https://x"), {})
+
+
+class StreamResponse:
+    def __init__(self, body: bytes, url: str):
+        self.stream = io.BytesIO(body)
+        self.url = url
+
+    def read(self, n=-1):
+        return self.stream.read(n)
+
+    def geturl(self):
+        return self.url
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class Download(unittest.TestCase):
+    HOSTS = ("api.github.com", "github.com", "codeload.github.com")
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dest = Path(tmp.name) / "out.tar.gz"
+
+    def use(self, opener):
+        patcher = mock.patch.object(http, "opener", opener)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_download_writes_file(self):
+        self.use(lambda req, timeout=None: StreamResponse(b"abc", "https://codeload.github.com/x"))
+        http.download("https://codeload.github.com/x", self.dest, allowed_hosts=self.HOSTS)
+        self.assertEqual(self.dest.read_bytes(), b"abc")
+
+    def test_redirect_off_github_is_refused(self):
+        self.use(lambda req, timeout=None: StreamResponse(b"abc", "https://evil.example/x"))
+        with self.assertRaises(http.HttpError):
+            http.download("https://api.github.com/x", self.dest, allowed_hosts=self.HOSTS)
+        self.assertFalse(self.dest.exists())
+
+    def test_download_too_large(self):
+        self.use(lambda req, timeout=None: StreamResponse(b"abc", "https://codeload.github.com/x"))
+        with self.assertRaises(http.HttpError):
+            http.download("https://codeload.github.com/x", self.dest, allowed_hosts=self.HOSTS, max_bytes=2)
+        self.assertFalse(self.dest.exists())
+
+    def test_download_http_error(self):
+        self.use(FakeOpener(http_error(404, "gone")))
+        with self.assertRaises(http.HttpError) as cm:
+            http.download("https://codeload.github.com/x", self.dest, allowed_hosts=self.HOSTS)
+        self.assertEqual(cm.exception.status, 404)
+        self.assertFalse(self.dest.exists())
+
+    def test_connection_cut_mid_body(self):
+        class Cut(StreamResponse):
+            def read(self, n=-1):
+                if self.stream.tell():
+                    raise IncompleteRead(b"ab")
+                return self.stream.read(2)
+
+        self.use(lambda req, timeout=None: Cut(b"abcd", "https://codeload.github.com/x"))
+        with self.assertRaises(http.HttpError) as cm:
+            http.download("https://codeload.github.com/x", self.dest, allowed_hosts=self.HOSTS)
+        self.assertEqual(cm.exception.status, 0)
+        self.assertFalse(self.dest.exists())
 
 
 if __name__ == "__main__":
