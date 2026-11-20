@@ -8,10 +8,15 @@ let info = null;
 let restarting = false;
 let installing = false;
 
+// The version that is staged; falls back to the latest one for an older server.
+function readyVersion() {
+  return info.ready || info.latest;
+}
+
 function readyLine() {
   const el = $("#update-badge");
   el.hidden = false;
-  el.innerHTML = `TheCollector ${esc(info.latest)} is ready · <button type="button" class="link" id="update-restart">Restart to use it</button>`;
+  el.innerHTML = `TheCollector ${esc(readyVersion())} is ready · <button type="button" class="link" id="update-restart">Restart to use it</button>`;
   $("#update-restart").onclick = restart;
 }
 
@@ -33,7 +38,9 @@ function open() {
   // Escape does the same as the cross, and is ignored while updating or restarting.
   dialog.addEventListener("cancel", (e) => {
     e.preventDefault();
-    if (!restarting && !installing) dismiss();
+    if (restarting || installing) return;
+    if (dialog.querySelector("#update-keep")) keepWorking();
+    else dismiss();
   });
   dialog.addEventListener("close", () => {
     dialog.remove();
@@ -99,20 +106,22 @@ async function install(button) {
   ready();
 }
 
+function keepWorking() {
+  closeDialog();
+  readyLine();
+}
+
 function ready() {
   open();
   dialog.innerHTML = `
-    <h2 id="update-title">TheCollector ${esc(info.latest)} is ready</h2>
+    <h2 id="update-title">TheCollector ${esc(readyVersion())} is ready</h2>
     <p>Restart now to start using it, or keep working and it will switch over the next time you open TheCollector.</p>
     <div class="update-buttons">
       <button type="button" class="primary" id="update-restart-now">Close and restart</button>
       <button type="button" id="update-keep">Keep working</button>
     </div>`;
   $("#update-restart-now", dialog).onclick = () => restart();
-  $("#update-keep", dialog).onclick = () => {
-    closeDialog();
-    readyLine();
-  };
+  $("#update-keep", dialog).onclick = keepWorking;
   focusMain();
 }
 
@@ -126,12 +135,14 @@ async function restart() {
     restarting = false;
     return notice(err.message);
   }
+  // Reload as soon as the app answers again, whatever version it is: the page then shows what
+  // is really running (a rolled-back update is simply offered again).
   const until = Date.now() + WAIT_FOR_RESTART_MS;
   while (Date.now() < until) {
     await new Promise((r) => setTimeout(r, 1000));
     try {
-      const status = await get("/api/status");
-      if (status.version === info.latest) return location.reload();
+      await get("/api/status");
+      return location.reload();
     } catch { /* the app is down for a moment while it restarts */ }
   }
   restarting = false;  // nothing more will happen, so let Escape and the button close this

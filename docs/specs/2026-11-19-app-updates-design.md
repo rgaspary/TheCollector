@@ -129,8 +129,8 @@ it for them when they click a button.
 - **When it checks:**
   - When the page loads, the frontend calls `GET /api/update`.
   - The server asks GitHub at most once every 24 hours. It stores the result and when it checked.
-  - If the check fails (offline, rate limited, odd answer), the answer is "no update" and no error
-    is shown. It is tried again after the 24 hours.
+  - If the check fails (offline, rate limited, odd answer), no error is shown, and the last
+    answer that worked (if any) is kept. It is tried again after the 24 hours.
 - **Saved state:** `DATA_DIR/update.json`, written with `atomic_write`, holds:
   `checked_at`, `latest` (version and url) and `skipped` (a version string).
 - **When the popup shows:** `latest > __version__`, `latest != skipped`, and no update is already

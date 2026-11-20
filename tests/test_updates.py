@@ -224,6 +224,28 @@ class UpdaterTest(FakeGitHub):
         self.assertEqual(info["state"], "ready")
         self.assertIs(info["show"], False)
 
+    def test_info_says_which_version_is_ready(self):
+        (self.root / ".update").mkdir()
+        (self.root / ".update" / "ready.json").write_text(
+            json.dumps({"version": "2.1.0", "folder": "staging-2.1.0"}))
+        self.opener.answer = {"tag_name": "v2.2.0", "html_url": "https://github.com/rgaspary/TheCollector/releases/tag/v2.2.0"}
+        info = self.make().info()
+        self.assertEqual(info["latest"], "2.2.0")
+        self.assertEqual(info["ready"], "2.1.0")
+
+    def test_ready_is_none_when_nothing_staged(self):
+        self.assertIsNone(self.make().info()["ready"])
+
+    def test_failed_check_keeps_last_good_answer(self):
+        up = self.make()
+        self.assertEqual(up.info()["latest"], "2.1.0")
+        self.opener.answer = urllib.error.HTTPError("https://x", 403, "no", {}, io.BytesIO(b""))
+        self.now = CHECK_EVERY + 1
+        info = up.info()
+        self.assertEqual(self.opener.calls, 2)
+        self.assertEqual(info["latest"], "2.1.0")
+        self.assertIsNone(info["error"])
+
     def test_no_ready_file(self):
         self.assertIsNone(self.make().ready_version())
 

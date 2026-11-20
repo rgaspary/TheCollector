@@ -209,7 +209,7 @@ class Updater:
                 self._check(data)
                 self._save(data)
             latest, url, skipped = data.get("latest"), data.get("url"), data.get("skipped")
-            ready = self.ready_version() is not None
+            ready = self.ready_version()
             newer = (isinstance(latest, str) and parse_tag("v" + latest) is not None
                      and parse_tag("v" + latest) > parse_version(self.current))
             return {
@@ -217,10 +217,11 @@ class Updater:
                 "latest": latest if isinstance(latest, str) else None,
                 "url": url if isinstance(url, str) else None,
                 "skipped": skipped if isinstance(skipped, str) else None,
+                "ready": ready,
                 "state": "ready" if ready else self.state,
                 "error": self.error,
                 "git": (self.root / ".git").exists(),
-                "show": bool(newer and latest != skipped and not ready),
+                "show": bool(newer and latest != skipped and ready is None),
             }
 
     def skip(self, version: str) -> None:
