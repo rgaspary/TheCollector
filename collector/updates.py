@@ -279,7 +279,32 @@ class Updater:
             self.state, self.error = ("failed", error) if error else ("ready", None)
 
 
-def _staged_folder(work: Path) -> tuple[str, Path] | None:
+def startup_lock(root: Path) -> object | None:
+    """Claim the install folder for this process, so two start-ups never swap files at once.
+
+    Returns something to hold on to for as long as the process lives, or None when another copy of
+    the app has it (or it can't be taken): then leave the files alone. The lock goes with the open
+    file, and Python doesn't pass open files on through execv, so a restart lets go of it and the new
+    process takes it again.
+    """
+    try:
+        import fcntl
+    except ImportError:  # Windows: no flock, so no lock (Windows isn't supported yet)
+        return True
+    try:
+        (root / ".update").mkdir(exist_ok=True)
+        handle = open(root / ".update" / "lock", "a")  # noqa: SIM115 - kept open on purpose
+    except OSError:
+        return None
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return None
+    return handle
+
+
+def _staged_folder(work: Path, current: str) -> tuple[str, Path] | None:
     """The version and folder ready.json points at, or None if it isn't there or can't be trusted."""
     try:
         data = json.loads((work / "ready.json").read_text(encoding="utf-8"))
@@ -290,6 +315,8 @@ def _staged_folder(work: Path) -> tuple[str, Path] | None:
     version, folder = data.get("version"), data.get("folder")
     if not isinstance(version, str) or parse_tag("v" + version) is None or folder != f"staging-{version}":
         return None
+    if parse_tag("v" + version) <= parse_version(current):
+        return None  # never put an older version (or the same one) over the one that's installed
     staging = work / folder
     # A copy without its code would leave an app that won't open, so don't swap it in.
     if staging.is_symlink() or not staging.is_dir() or not (staging / "collector" / "__init__.py").is_file():
@@ -326,7 +353,7 @@ def apply_staged(root: Path, current: str = __version__) -> bool:
     work = root / ".update"
     if not work.is_dir():
         return False
-    staged = _staged_folder(work)
+    staged = _staged_folder(work, current)
     if staged is None:
         _clear_leftovers(work)
         return False

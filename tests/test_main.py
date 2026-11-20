@@ -44,6 +44,7 @@ def run_main(cfg: config_mod.Config, argv: list[str]) -> tuple[int, str, str, mo
     out, err = io.StringIO(), io.StringIO()
     # The updater is switched off so these tests never touch the real install folder.
     with mock.patch.object(app_main.config, "load", return_value=cfg), \
+            mock.patch.object(updates, "startup_lock", return_value=True), \
             mock.patch.object(updates, "apply_staged", return_value=False), \
             mock.patch.object(updates, "cleanup_previous"), \
             mock.patch.object(app_main.webbrowser, "open") as opened, \
@@ -91,7 +92,8 @@ class Restarted(Exception):
 
 class Updates(unittest.TestCase):
     def test_staged_update_restarts_before_serving(self):
-        with mock.patch.object(updates, "apply_staged", return_value=True) as applied, \
+        with mock.patch.object(updates, "startup_lock", return_value=True), \
+                mock.patch.object(updates, "apply_staged", return_value=True) as applied, \
                 mock.patch.object(updates, "restart", side_effect=Restarted) as restart, \
                 mock.patch.object(updates, "cleanup_previous") as cleanup, \
                 mock.patch.object(app_main, "serve") as serve, \
@@ -116,6 +118,7 @@ class Updates(unittest.TestCase):
 
         result = []
         with mock.patch.object(app_main.config, "load", return_value=cfg), \
+                mock.patch.object(updates, "startup_lock", return_value=True), \
                 mock.patch.object(updates, "apply_staged", return_value=False), \
                 mock.patch.object(updates, "restart") as restart, \
                 mock.patch.object(updates, "cleanup_previous") as cleanup, \
@@ -146,6 +149,7 @@ class Updates(unittest.TestCase):
             return made[0]
 
         with mock.patch.object(app_main.config, "load", return_value=cfg), \
+                mock.patch.object(updates, "startup_lock", return_value=True), \
                 mock.patch.object(updates, "apply_staged", return_value=False), \
                 mock.patch.object(updates, "restart") as restart, \
                 mock.patch.object(updates, "cleanup_previous"), \
@@ -157,6 +161,35 @@ class Updates(unittest.TestCase):
             self.assertTrue(bound.wait(5))
             made[0].shutdown()
             thread.join(5)
+        restart.assert_not_called()
+
+    def test_another_start_up_holding_the_lock_leaves_files_alone(self):
+        root = Path(tempfile.mkdtemp())
+        holder = updates.startup_lock(root)  # another process, as far as flock is concerned
+        self.addCleanup(holder.close)
+        cfg = make_cfg(0)
+        made, bound = [], threading.Event()
+
+        def serve(cfg, app):
+            made.append(web.serve(cfg, app))
+            bound.set()
+            return made[0]
+
+        with mock.patch.object(config_mod, "ROOT", root), \
+                mock.patch.object(app_main.config, "load", return_value=cfg), \
+                mock.patch.object(updates, "apply_staged", return_value=True) as applied, \
+                mock.patch.object(updates, "restart") as restart, \
+                mock.patch.object(updates, "cleanup_previous") as cleanup, \
+                mock.patch.object(app_main, "App", side_effect=make_app), \
+                mock.patch.object(app_main, "serve", side_effect=serve), \
+                contextlib.redirect_stdout(io.StringIO()):
+            thread = threading.Thread(target=app_main.main, args=(["--no-browser"],), daemon=True)
+            thread.start()
+            self.assertTrue(bound.wait(5))
+            made[0].shutdown()
+            thread.join(5)
+        applied.assert_not_called()
+        cleanup.assert_not_called()
         restart.assert_not_called()
 
     def test_app_does_not_ask_for_restart_by_default(self):

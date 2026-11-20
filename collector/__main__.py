@@ -22,8 +22,11 @@ def _is_collector(url: str) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    # Held until this process ends. Without it, another copy is starting or running, and it alone
+    # may touch the install folder: this one goes on to find the port taken.
+    lock = updates.startup_lock(config.ROOT)
     # Before anything else, so a staged update is in place before any of the old code is used.
-    if updates.apply_staged(config.ROOT):
+    if lock and updates.apply_staged(config.ROOT):
         updates.restart(argv)
     browser = "--no-browser" not in argv
     cfg = config.load()
@@ -46,7 +49,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     # This copy is up and running, so the files it replaced are no longer needed.
-    updates.cleanup_previous(config.ROOT)
+    if lock:
+        updates.cleanup_previous(config.ROOT)
     print(f"TheCollector running at {url}  (Ctrl+C to stop)")
     if browser:
         threading.Timer(0.5, webbrowser.open, [url]).start()

@@ -440,8 +440,8 @@ class StageTest(FakeGitHub):
         self.assertIsNone(up.ready_version())
 
 
-def make_install(root: Path) -> Path:
-    """An installed copy with the person's own files, and 2.1.0 staged and marked ready."""
+def make_install(root: Path, version: str = "2.1.0") -> Path:
+    """An installed copy with the person's own files, and `version` staged and marked ready."""
     (root / "collector").mkdir(parents=True)
     (root / "collector" / "old.py").write_text("old")
     (root / "config.toml").write_text("mine")
@@ -450,13 +450,13 @@ def make_install(root: Path) -> Path:
     (root / ".git" / "HEAD").write_text("ref")
     (root / "static").mkdir()
     (root / "static" / "old.css").write_text("old")
-    staging = root / ".update" / "staging-2.1.0"
+    staging = root / ".update" / f"staging-{version}"
     (staging / "collector").mkdir(parents=True)
-    (staging / "collector" / "__init__.py").write_text('__version__ = "2.1.0"\n')
+    (staging / "collector" / "__init__.py").write_text(f'__version__ = "{version}"\n')
     (staging / "collector" / "new.py").write_text("new")
     (staging / "static").mkdir()
     (staging / "static" / "new.css").write_text("new")
-    (root / ".update" / "ready.json").write_text(json.dumps({"version": "2.1.0", "folder": "staging-2.1.0"}))
+    (root / ".update" / "ready.json").write_text(json.dumps({"version": version, "folder": staging.name}))
     return staging
 
 
@@ -594,6 +594,24 @@ class ApplyTest(unittest.TestCase):
                 self.assertEqual(tree(root), before)
                 self.assertEqual(list((root / ".update").iterdir()), [])
 
+    def test_older_or_same_version_is_never_applied(self):
+        for version in ("2.0.0", "1.9.9"):
+            with self.subTest(version=version):
+                root = Path(tempfile.mkdtemp())
+                self.addCleanup(shutil.rmtree, root, True)
+                make_install(root, version)
+                before = tree(root)
+
+                self.assertIs(apply_staged(root, current="2.0.0"), False)
+
+                self.assertEqual(tree(root), before)
+                self.assertEqual(list((root / ".update").iterdir()), [])
+
+    def test_newer_than_a_dev_build_is_applied(self):
+        make_install(self.root)
+
+        self.assertIs(apply_staged(self.root, current="2.0.0-dev"), True)
+
     def test_ready_pointing_at_missing_or_broken_copy_is_refused(self):
         staging = make_install(self.root)
         (staging / "collector" / "__init__.py").unlink()
@@ -635,6 +653,40 @@ class ApplyTest(unittest.TestCase):
         self.assertFalse((self.root / ".update" / "previous-2.0.0").exists())
         self.assertTrue((self.root / ".update" / "ready.json").exists())
         cleanup_previous(self.root / "missing")  # no .update at all is fine
+
+
+class StartupLockTest(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root, True)
+
+    def test_only_one_process_gets_the_lock(self):
+        first = updates.startup_lock(self.root)
+        self.addCleanup(first.close)
+
+        self.assertIsNotNone(first)
+        self.assertTrue((self.root / ".update" / "lock").exists())
+        self.assertIsNone(updates.startup_lock(self.root))
+
+    def test_lock_is_free_again_once_the_holder_closes(self):
+        first = updates.startup_lock(self.root)
+        first.close()
+
+        second = updates.startup_lock(self.root)
+        self.addCleanup(second.close)
+        self.assertIsNotNone(second)
+
+    def test_lock_file_survives_leftover_clean_up(self):
+        handle = updates.startup_lock(self.root)
+        self.addCleanup(handle.close)
+
+        self.assertIs(apply_staged(self.root), False)
+        cleanup_previous(self.root)
+
+        self.assertTrue((self.root / ".update" / "lock").exists())
+
+    def test_unwritable_install_folder_gives_no_lock(self):
+        self.assertIsNone(updates.startup_lock(self.root / "missing" / "deeper"))
 
 
 class RestartTest(unittest.TestCase):
