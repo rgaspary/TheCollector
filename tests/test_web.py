@@ -10,12 +10,13 @@ from pathlib import Path
 from unittest import mock
 
 from collector import config as config_mod
-from collector import web
+from collector import http, web
 from collector.choices import Choices
 from collector.credentials import CredentialStore
 from collector.sources import REGISTRY
 from collector.sources.base import CredentialError, Field, Source, SourceError
 from collector.tracks import LocalTrack, Playlist, SourceTrack
+from collector.updates import Updater
 
 SECRET = "s3cret-value-never-shown"
 
@@ -98,7 +99,8 @@ class ApiTest(unittest.TestCase):
         cfg = config_mod.load(self.config_path)
         self.store = CredentialStore(d / "credentials.json")
         self.app = web.App(cfg, config_path=self.config_path, store=self.store,
-                           choices=Choices(d / "choices.json"), v1_token_file=d / "no-token.json")
+                           choices=Choices(d / "choices.json"), v1_token_file=d / "no-token.json",
+                           updater=Updater(root=d / "install", state_path=d / "update.json"))
         self.server = web.serve(cfg, self.app)
         self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
         threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True).start()
@@ -472,6 +474,55 @@ class Icons(unittest.TestCase):
         for folder, name in named:
             self.assertTrue((icons / folder / name).is_file(), f"{folder}/{name}")
         self.assertTrue((icons / "SOURCES.md").is_file())
+
+
+class FakeLatest:
+    """Stands in for GitHub: every request is answered with a release called v2.1.0."""
+
+    def __call__(self, req, timeout=None):
+        body = json.dumps({"tag_name": "v2.1.0", "html_url": "https://github.com/x/y/releases/tag/v2.1.0"})
+        resp = mock.MagicMock()
+        resp.__enter__.return_value = resp
+        resp.read.return_value = body.encode()
+        return resp
+
+
+class Updates(ApiTest):
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.object(http, "opener", FakeLatest())
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_update_info(self):
+        status, data = self.get("/api/update")
+        self.assertEqual(status, 200)
+        self.assertEqual(data["latest"], "2.1.0")
+        self.assertIs(data["show"], True)
+
+    def test_skip(self):
+        status, data = self.post("/api/update/skip", {"version": "2.1.0"})
+        self.assertEqual(status, 200)
+        self.assertIs(data["show"], False)
+        status, _ = self.post("/api/update/skip", {"version": 5})
+        self.assertEqual(status, 400)
+
+    def test_download_refused_for_git_checkout(self):
+        (Path(self.tmp.name) / "install" / ".git").mkdir(parents=True)
+        status, data = self.post("/api/update/download")
+        self.assertEqual(status, 409)
+        self.assertEqual(data["error"], "This copy is a git checkout. Update it with git.")
+
+    def test_update_posts_need_same_origin(self):
+        status, _ = self.post("/api/update/restart", headers={"Origin": "http://evil.example"})
+        self.assertEqual(status, 403)
+        self.assertFalse(self.app.restart_requested)
+
+    def test_restart_sets_flag(self):
+        status, data = self.post("/api/update/restart")
+        self.assertEqual((status, data), (200, {"ok": True}))
+        self.assertTrue(self.app.restart_requested)
+        # serve_forever has stopped, so shutting down again in the cleanup returns at once.
 
 
 if __name__ == "__main__":
