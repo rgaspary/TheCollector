@@ -1,6 +1,7 @@
 """Checking for a newer TheCollector release, and the update state the app shows."""
 import gzip
 import json
+import os
 import posixpath
 import re
 import shutil
@@ -12,6 +13,7 @@ import time
 import zlib
 from collections.abc import Callable
 from pathlib import Path
+from typing import NoReturn
 
 from . import __version__, config, http
 from .files import atomic_write
@@ -20,6 +22,8 @@ REPO = "rgaspary/TheCollector"
 LATEST_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
 TARBALL_URL = "https://api.github.com/repos/" + REPO + "/tarball/v{version}"
 CHECK_EVERY = 24 * 3600
+# Folders and files the download leaves in .update/ on its way to being ready.
+LEFTOVERS = ("staging-", "unpack-", "download-")
 # Never moved out of the way when a new version is put in place: the person's own data and our workspace.
 KEEP = frozenset({"config.toml", "collector.log", ".update", ".git", ".venv"})
 GITHUB_HOSTS = ("api.github.com", "github.com", "codeload.github.com")
@@ -273,3 +277,119 @@ class Updater:
                 _remove(unpack)
         with self.lock:
             self.state, self.error = ("failed", error) if error else ("ready", None)
+
+
+def _staged_folder(work: Path) -> tuple[str, Path] | None:
+    """The version and folder ready.json points at, or None if it isn't there or can't be trusted."""
+    try:
+        data = json.loads((work / "ready.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    version, folder = data.get("version"), data.get("folder")
+    if not isinstance(version, str) or parse_tag("v" + version) is None or folder != f"staging-{version}":
+        return None
+    staging = work / folder
+    # A copy without its code would leave an app that won't open, so don't swap it in.
+    if staging.is_symlink() or not staging.is_dir() or not (staging / "collector" / "__init__.py").is_file():
+        return None
+    return version, staging
+
+
+def _clear_leftovers(work: Path) -> None:
+    """Delete ready.json and every half-finished or abandoned download, whatever its version."""
+    _remove(work / "ready.json")
+    try:
+        entries = list(work.iterdir())
+    except OSError:
+        return
+    for entry in entries:
+        if entry.name.startswith(LEFTOVERS):
+            _remove(entry)
+
+
+def _move(src: Path, dst: Path, moves: list[tuple[Path, Path]]) -> None:
+    """Rename src to dst and note it, so it can be undone. Never lands on top of something already there."""
+    if dst.exists() or dst.is_symlink():
+        raise OSError(f"{dst.name} is in the way")
+    os.replace(src, dst)
+    moves.append((src, dst))
+
+
+def apply_staged(root: Path, current: str = __version__) -> bool:
+    """Put a staged update in place of the running copy's files. True means restart to use it.
+
+    Only renames, inside one folder, so nothing is rewritten in place. If any of them fails, every
+    rename done so far is undone in reverse order and the old version starts as before.
+    """
+    work = root / ".update"
+    if not work.is_dir():
+        return False
+    staged = _staged_folder(work)
+    if staged is None:
+        _clear_leftovers(work)
+        return False
+    version, staging = staged
+    previous = work / f"previous-{current}"
+    moves: list[tuple[Path, Path]] = []
+    try:
+        _remove(previous)  # from an earlier swap whose clean-up didn't get to run
+        previous.mkdir()
+        for entry in sorted(root.iterdir()):
+            if entry.name not in KEEP:
+                _move(entry, previous / entry.name, moves)
+        for entry in sorted(staging.iterdir()):
+            # The person's settings and our own folders are never replaced by whatever the release holds.
+            if entry.name not in KEEP:
+                _move(entry, root / entry.name, moves)
+    except OSError as e:
+        undone = True
+        for src, dst in reversed(moves):
+            try:
+                os.replace(dst, src)
+            except OSError:
+                undone = False
+        _clear_leftovers(work)
+        if undone:
+            try:
+                previous.rmdir()
+            except OSError:
+                pass
+            print(f"Couldn't switch to TheCollector {version}, so the current version is starting instead. "
+                  f"The update will be offered again. ({e.strerror or e})", flush=True)
+        else:
+            # Out of cleanup_previous's reach, since these may be the only copy of the old files.
+            kept = work / f"kept-{current}"
+            try:
+                os.replace(previous, kept)
+            except OSError:
+                kept = previous
+            print(f"Couldn't switch to TheCollector {version}, and couldn't put every file back. "
+                  f"The old files are in {kept}. ({e.strerror or e})", flush=True)
+        return False
+    _remove(work / "ready.json")
+    _remove(staging)  # only anything left behind on purpose is still in it
+    return True
+
+
+def cleanup_previous(root: Path) -> None:
+    """Delete the old version's files, set aside by the last swap. Called once the new version is up."""
+    try:
+        entries = list((root / ".update").iterdir())
+    except OSError:
+        return
+    for entry in entries:
+        if entry.name.startswith("previous-"):
+            shutil.rmtree(entry, ignore_errors=True)
+
+
+def restart(argv: list[str]) -> NoReturn:
+    """Replace this process with a fresh copy of the app, without opening another browser tab.
+
+    The launcher's working folder and PYTHONPATH carry over, so "-m collector" finds the new code.
+    """
+    args = argv if "--no-browser" in argv else [*argv, "--no-browser"]
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os.execv(sys.executable, [sys.executable, "-m", "collector", *args])

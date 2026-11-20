@@ -1,6 +1,8 @@
 import io
 import json
 import os
+import shutil
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -15,6 +17,8 @@ from collector.updates import (
     TARBALL_URL,
     UpdateError,
     Updater,
+    apply_staged,
+    cleanup_previous,
     extract_release,
     parse_tag,
     parse_version,
@@ -434,6 +438,215 @@ class StageTest(FakeGitHub):
         up.stage()
         self.assertEqual(up.state, "failed")
         self.assertIsNone(up.ready_version())
+
+
+def make_install(root: Path) -> Path:
+    """An installed copy with the person's own files, and 2.1.0 staged and marked ready."""
+    (root / "collector").mkdir(parents=True)
+    (root / "collector" / "old.py").write_text("old")
+    (root / "config.toml").write_text("mine")
+    (root / "collector.log").write_text("log")
+    (root / ".git").mkdir()
+    (root / ".git" / "HEAD").write_text("ref")
+    (root / "static").mkdir()
+    (root / "static" / "old.css").write_text("old")
+    staging = root / ".update" / "staging-2.1.0"
+    (staging / "collector").mkdir(parents=True)
+    (staging / "collector" / "__init__.py").write_text('__version__ = "2.1.0"\n')
+    (staging / "collector" / "new.py").write_text("new")
+    (staging / "static").mkdir()
+    (staging / "static" / "new.css").write_text("new")
+    (root / ".update" / "ready.json").write_text(json.dumps({"version": "2.1.0", "folder": "staging-2.1.0"}))
+    return staging
+
+
+def tree(root: Path) -> dict[str, str]:
+    """Every file under root (outside .update) and what it holds."""
+    return {str(p.relative_to(root)): p.read_text() for p in root.rglob("*")
+            if p.is_file() and p.relative_to(root).parts[0] != ".update"}
+
+
+class ApplyTest(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.out = io.StringIO()
+        patcher = mock.patch("sys.stdout", self.out)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_apply_swaps_and_keeps_settings(self):
+        make_install(self.root)
+
+        self.assertIs(apply_staged(self.root), True)
+
+        self.assertTrue((self.root / "collector" / "new.py").exists())
+        self.assertFalse((self.root / "collector" / "old.py").exists())
+        self.assertTrue((self.root / "static" / "new.css").exists())
+        self.assertEqual((self.root / "config.toml").read_text(), "mine")
+        self.assertEqual((self.root / "collector.log").read_text(), "log")
+        self.assertEqual((self.root / ".git" / "HEAD").read_text(), "ref")
+        self.assertFalse((self.root / ".update" / "ready.json").exists())
+        self.assertFalse((self.root / ".update" / "staging-2.1.0").exists())
+        previous = self.root / ".update" / f"previous-{updates.__version__}"
+        self.assertTrue((previous / "collector" / "old.py").exists())
+        self.assertFalse((previous / "config.toml").exists())
+
+    def test_apply_rolls_back_on_failure(self):
+        make_install(self.root)
+        before = tree(self.root)
+        real, calls = os.replace, []
+
+        def flaky(src, dst):
+            calls.append(src)
+            if len(calls) == 2:
+                raise OSError("permission denied")
+            return real(src, dst)
+
+        with mock.patch("os.replace", side_effect=flaky):
+            self.assertIs(apply_staged(self.root), False)
+
+        self.assertEqual(tree(self.root), before)
+        self.assertFalse((self.root / ".update" / "ready.json").exists())
+        self.assertFalse((self.root / ".update" / "staging-2.1.0").exists())
+        self.assertFalse((self.root / ".update" / f"previous-{updates.__version__}").exists())
+        self.assertIn("Couldn't switch to TheCollector 2.1.0", self.out.getvalue())
+
+    def test_rollback_when_moving_new_files_in_fails(self):
+        make_install(self.root)
+        before = tree(self.root)
+        real = os.replace
+
+        def flaky(src, dst):
+            if Path(src).parent.name == "staging-2.1.0" and Path(src).name == "static":
+                raise OSError("disk full")
+            return real(src, dst)
+
+        with mock.patch("os.replace", side_effect=flaky):
+            self.assertIs(apply_staged(self.root), False)
+
+        self.assertEqual(tree(self.root), before)
+        self.assertFalse((self.root / ".update" / "staging-2.1.0").exists())
+
+    def test_failed_rollback_keeps_old_files_out_of_cleanup(self):
+        make_install(self.root)
+        real, calls = os.replace, []
+
+        def flaky(src, dst):
+            calls.append(src)
+            if len(calls) == 2 or Path(src).parent.name.startswith("previous-"):
+                raise OSError("permission denied")
+            return real(src, dst)
+
+        with mock.patch("os.replace", side_effect=flaky):
+            self.assertIs(apply_staged(self.root), False)
+        cleanup_previous(self.root)
+
+        kept = self.root / ".update" / f"kept-{updates.__version__}"
+        self.assertTrue((kept / "collector" / "old.py").exists())
+        self.assertIn(str(kept), self.out.getvalue())
+
+    def test_staged_copy_never_overwrites_kept_files(self):
+        staging = make_install(self.root)
+        (staging / "config.toml").write_text("theirs")
+        (staging / ".git").mkdir()
+
+        self.assertIs(apply_staged(self.root), True)
+
+        self.assertEqual((self.root / "config.toml").read_text(), "mine")
+        self.assertEqual((self.root / ".git" / "HEAD").read_text(), "ref")
+        self.assertFalse((self.root / ".update" / "staging-2.1.0").exists())
+
+    def test_leftover_staging_without_ready_is_removed(self):
+        make_install(self.root)
+        (self.root / ".update" / "ready.json").unlink()
+        (self.root / ".update" / "staging-1.9.0").mkdir()
+        (self.root / ".update" / "unpack-2.1.0").mkdir()
+        (self.root / ".update" / "download-2.1.0.tar.gz").write_bytes(b"x")
+        before = tree(self.root)
+
+        self.assertIs(apply_staged(self.root), False)
+
+        self.assertEqual(list((self.root / ".update").iterdir()), [])
+        self.assertEqual(tree(self.root), before)
+
+    def test_bad_ready_is_deleted_and_nothing_moves(self):
+        bad = [
+            "not json",
+            json.dumps(["2.1.0"]),
+            json.dumps({"version": "2.1", "folder": "staging-2.1"}),
+            json.dumps({"version": "2.1.0", "folder": "../.."}),
+            json.dumps({"version": "2.1.0", "folder": "staging-2.0.0"}),
+            json.dumps({"version": "2.1.0"}),
+            json.dumps({"version": 2, "folder": "staging-2"}),
+        ]
+        for body in bad:
+            with self.subTest(body=body):
+                root = Path(tempfile.mkdtemp())
+                self.addCleanup(shutil.rmtree, root, True)
+                make_install(root)
+                (root / ".update" / "staging-2.0.0").mkdir()
+                (root / ".update" / "ready.json").write_text(body)
+                before = tree(root)
+
+                self.assertIs(apply_staged(root), False)
+
+                self.assertEqual(tree(root), before)
+                self.assertEqual(list((root / ".update").iterdir()), [])
+
+    def test_ready_pointing_at_missing_or_broken_copy_is_refused(self):
+        staging = make_install(self.root)
+        (staging / "collector" / "__init__.py").unlink()
+        before = tree(self.root)
+
+        self.assertIs(apply_staged(self.root), False)
+
+        self.assertEqual(tree(self.root), before)
+        self.assertEqual(list((self.root / ".update").iterdir()), [])
+
+    def test_previous_left_from_before_is_replaced(self):
+        make_install(self.root)
+        stale = self.root / ".update" / f"previous-{updates.__version__}" / "collector"
+        stale.mkdir(parents=True)
+        (stale / "stale.py").write_text("stale")
+
+        self.assertIs(apply_staged(self.root), True)
+
+        previous = self.root / ".update" / f"previous-{updates.__version__}"
+        self.assertTrue((previous / "collector" / "old.py").exists())
+        self.assertFalse((previous / "collector" / "stale.py").exists())
+        self.assertTrue((self.root / "collector" / "new.py").exists())
+
+    def test_nothing_staged(self):
+        (self.root / "collector").mkdir()
+
+        self.assertIs(apply_staged(self.root), False)
+
+        self.assertFalse((self.root / ".update").exists())
+        self.assertEqual([p.name for p in self.root.iterdir()], ["collector"])
+
+    def test_cleanup_previous(self):
+        (self.root / ".update" / "previous-2.0.0" / "collector").mkdir(parents=True)
+        (self.root / ".update" / "previous-2.0.0" / "collector" / "old.py").write_text("old")
+        (self.root / ".update" / "ready.json").write_text("{}")
+
+        cleanup_previous(self.root)
+
+        self.assertFalse((self.root / ".update" / "previous-2.0.0").exists())
+        self.assertTrue((self.root / ".update" / "ready.json").exists())
+        cleanup_previous(self.root / "missing")  # no .update at all is fine
+
+
+class RestartTest(unittest.TestCase):
+    def test_restart_adds_no_browser(self):
+        with mock.patch("os.execv") as execv:
+            updates.restart([])
+            execv.assert_called_once_with(sys.executable, [sys.executable, "-m", "collector", "--no-browser"])
+
+    def test_restart_keeps_no_browser_once(self):
+        with mock.patch("os.execv") as execv:
+            updates.restart(["--no-browser"])
+            execv.assert_called_once_with(sys.executable, [sys.executable, "-m", "collector", "--no-browser"])
 
 
 if __name__ == "__main__":

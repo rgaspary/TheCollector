@@ -71,6 +71,8 @@ class App:
     store: CredentialStore = field(default_factory=CredentialStore)
     choices: Choices = field(default_factory=Choices)
     v1_token_file: Path = V1_TOKEN_FILE
+    # Set by the restart button; main() re-runs the app once the server has shut down.
+    restart_requested: bool = False
 
     def __post_init__(self):
         migrate_v1(self.store, self.cfg, self.v1_token_file)

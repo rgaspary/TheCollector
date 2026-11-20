@@ -6,8 +6,8 @@ import threading
 import urllib.request
 import webbrowser
 
-from . import config
-from .web import serve
+from . import config, updates
+from .web import App, serve
 
 
 def _is_collector(url: str) -> bool:
@@ -22,11 +22,15 @@ def _is_collector(url: str) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    # Before anything else, so a staged update is in place before any of the old code is used.
+    if updates.apply_staged(config.ROOT):
+        updates.restart(argv)
     browser = "--no-browser" not in argv
     cfg = config.load()
     url = f"http://{cfg.host}:{cfg.port}/"
+    app = App(cfg)
     try:
-        server = serve(cfg)
+        server = serve(cfg, app)
     except OSError as e:
         if e.errno != errno.EADDRINUSE:
             raise
@@ -41,6 +45,8 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 1
 
+    # This copy is up and running, so the files it replaced are no longer needed.
+    updates.cleanup_previous(config.ROOT)
     print(f"TheCollector running at {url}  (Ctrl+C to stop)")
     if browser:
         threading.Timer(0.5, webbrowser.open, [url]).start()
@@ -50,6 +56,8 @@ def main(argv: list[str] | None = None) -> int:
         pass
     finally:
         server.server_close()
+    if app.restart_requested:
+        updates.restart(argv)
     return 0
 
 
