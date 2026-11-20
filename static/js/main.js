@@ -14,6 +14,7 @@ import { reviewScreen } from "./screens/review.js";
 import { settingsScreen } from "./screens/settings.js";
 import { sourceScreen } from "./screens/source.js";
 import { state } from "./state.js";
+import { checkForUpdate } from "./update.js";
 import { $, showError, showNotice } from "./ui.js";
 
 const BUILT = {
@@ -70,6 +71,7 @@ async function start() {
   state.library = state.status.library;
   $("#version").textContent = `v${state.status.version}`;
   renderLibraryBadge();
+  checkForUpdate();
   await go(state.library.configured ? "source" : "library");
 }
 

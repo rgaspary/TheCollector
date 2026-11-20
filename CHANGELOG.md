@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- TheCollector tells you when a new version is out and installs it with one click. You can restart right away or keep working and switch over the next time you open it. "Skip this version" hides the notice until a newer one comes out.
+
 ## 2.0.0 (2026-11-19)
 
 ### Added
