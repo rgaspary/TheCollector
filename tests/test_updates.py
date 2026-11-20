@@ -272,55 +272,69 @@ class StageTest(FakeGitHub):
         self.assertEqual(self.staged(), ["ready.json", "staging-2.1.0"])
         self.assertEqual(up.info()["state"], "ready")
 
+    def assert_rejected(self, label, extra):
+        """extract_release refuses the release with `extra` members added and writes nothing anywhere."""
+        case = self.work / label.replace(" ", "-")
+        case.mkdir()
+        tar = make_release(case, "2.1.0", extra=extra)
+        dest = case / "out" / "dest"
+        dest.mkdir(parents=True)
+        with self.assertRaises(UpdateError) as cm:
+            extract_release(tar, dest)
+        self.assertEqual(str(cm.exception), "The download looks damaged. Try again later.")
+        self.assertEqual(sorted(p.name for p in case.iterdir()), ["out", tar.name])
+        self.assertEqual([p.name for p in (case / "out").iterdir()], ["dest"])
+        self.assertEqual(list(dest.iterdir()), [])
+
     def test_unsafe_members_rejected(self):
         bad = {
             "dotdot": member("../evil"),
             "absolute": member("/abs"),
             "symlink out": member(f"{TOP}/link", tarfile.SYMTYPE, linkname="/etc/passwd"),
             "relative symlink out": member(f"{TOP}/link", tarfile.SYMTYPE, linkname="../../evil"),
+            "symlink inside": member(f"{TOP}/link", tarfile.SYMTYPE, linkname="collector/web.py"),
             "hardlink out": member(f"{TOP}/hard", tarfile.LNKTYPE, linkname="../evil"),
+            "hardlink inside": member(f"{TOP}/hard", tarfile.LNKTYPE, linkname=f"{TOP}/collector/web.py"),
             "device": member(f"{TOP}/dev", tarfile.CHRTYPE),
             "fifo": member(f"{TOP}/fifo", tarfile.FIFOTYPE),
             "second top folder": member("other/file.txt"),
         }
-        for label, (info, data) in bad.items():
-            with self.subTest(label):
-                case = self.work / label.replace(" ", "-")
-                case.mkdir()
-                tar = make_release(case, "2.1.0", extra=[(info, data)])
-                dest = case / "out" / "dest"
-                dest.mkdir(parents=True)
-                with self.assertRaises(UpdateError) as cm:
-                    extract_release(tar, dest)
-                self.assertEqual(str(cm.exception), "The download looks damaged. Try again later.")
-                self.assertEqual(sorted(p.name for p in case.iterdir()), ["out", tar.name])
-                self.assertEqual([p.name for p in (case / "out").iterdir()], ["dest"])
-                self.assertEqual(list(dest.iterdir()), [])
+        # Without the data filter (Python before 3.11.4) the hand checks are the only guard.
+        for has_filter in (True, False):
+            for label, (info, data) in bad.items():
+                with self.subTest(label, data_filter=has_filter), \
+                        mock.patch.object(updates, "HAS_DATA_FILTER", has_filter):
+                    self.assert_rejected(f"{label} {has_filter}", [(info, data)])
         self.assertFalse(Path("/abs").exists())
 
-    def test_safe_release_extracts(self):
-        tar = make_release(self.work, "2.1.0", extra=[member(f"{TOP}/link", tarfile.SYMTYPE,
-                                                            linkname="collector/web.py")])
-        dest = self.work / "dest"
-        dest.mkdir()
-        top = extract_release(tar, dest)
-        self.assertEqual(top, dest / TOP)
-        self.assertTrue((top / "link").is_symlink())
+    def test_symlink_chain_rejected(self):
+        # Each link looks harmless on its own, but together they lead out of the folder.
+        chain = [member(f"{TOP}/l", tarfile.SYMTYPE, linkname=".."),
+                 member(f"{TOP}/l/m", tarfile.SYMTYPE, linkname=".."),
+                 member(f"{TOP}/l/m/evil")]
+        for has_filter in (True, False):
+            with self.subTest(data_filter=has_filter), mock.patch.object(updates, "HAS_DATA_FILTER", has_filter):
+                self.assert_rejected(f"chain {has_filter}", chain)
 
-    def test_extracts_without_data_filter(self):
-        # Python before 3.11.4 has no filter="data": the hand checks must still guard it.
-        with mock.patch.object(updates, "HAS_DATA_FILTER", False):
+    def test_safe_release_extracts(self):
+        for has_filter in (True, False):
+            with self.subTest(data_filter=has_filter), mock.patch.object(updates, "HAS_DATA_FILTER", has_filter):
+                dest = self.work / f"dest-{has_filter}"
+                dest.mkdir()
+                top = extract_release(make_release(self.work, "2.1.0"), dest)
+                self.assertEqual(top, dest / TOP)
+                self.assertTrue((top / "collector-launch.sh").stat().st_mode & 0o111)
+                self.assertEqual((top / "collector" / "__init__.py").read_text(), '__version__ = "2.1.0"\n')
+
+    def test_fallback_skips_python_filter(self):
+        # So the fallback tests above prove the hand checks alone, not Python 3.14's default filter.
+        with mock.patch.object(updates, "HAS_DATA_FILTER", False), \
+                mock.patch.object(tarfile.TarFile, "extractall", autospec=True) as extractall:
             dest = self.work / "dest"
             dest.mkdir()
-            top = extract_release(make_release(self.work, "2.1.0"), dest)
-            self.assertTrue((top / "collector-launch.sh").stat().st_mode & 0o111)
-            bad = self.work / "bad"
-            bad.mkdir()
-            tar = make_release(bad, "2.1.0", extra=[member(f"{TOP}/link", tarfile.SYMTYPE, linkname="/etc/passwd")])
-            (bad / "dest").mkdir()
-            with self.assertRaises(UpdateError):
-                extract_release(tar, bad / "dest")
-            self.assertEqual(list((bad / "dest").iterdir()), [])
+            with self.assertRaises(UpdateError):  # nothing was really extracted
+                extract_release(make_release(self.work, "2.1.0"), dest)
+        self.assertEqual(extractall.call_args.kwargs.get("filter"), "fully_trusted")
 
     def test_not_a_tarball(self):
         junk = self.work / "junk.tar.gz"

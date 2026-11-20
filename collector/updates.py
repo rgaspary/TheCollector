@@ -53,34 +53,22 @@ def parse_version(v: str) -> tuple[int, int, int]:
     return tuple(int(g) for g in nums.groups()) if nums else (0, 0, 0)
 
 
-def _escapes(path: str) -> bool:
-    """True when an archive path (already joined and normalised) points outside the folder."""
-    return path == ".." or path.startswith("../") or posixpath.isabs(path)
-
-
 def _check_members(members: list[tarfile.TarInfo]) -> str:
-    """Refuse anything that could write outside the folder, and return the one top-level folder's name."""
+    """Refuse anything that could write outside the folder, and return the one top-level folder's name.
+
+    Links are refused outright: our releases never contain any, and a chain of links that each look
+    harmless (l -> .., l/m -> ..) can still lead out of the folder.
+    """
     tops, total = set(), 0
     for m in members:
-        if posixpath.isabs(m.name) or ".." in m.name.split("/") or m.isdev():
+        if posixpath.isabs(m.name) or ".." in m.name.split("/") or not (m.isfile() or m.isdir()):
             raise UpdateError(DAMAGED)
         name = posixpath.normpath(m.name)
-        if m.issym():
-            # A symlink's target is relative to the folder the link sits in.
-            if posixpath.isabs(m.linkname) or _escapes(posixpath.normpath(
-                    posixpath.join(posixpath.dirname(name), m.linkname))):
-                raise UpdateError(DAMAGED)
-        elif m.islnk():
-            # A hard link's target is relative to the top of the archive.
-            if _escapes(posixpath.normpath(m.linkname)):
-                raise UpdateError(DAMAGED)
-        elif not (m.isfile() or m.isdir()):
-            raise UpdateError(DAMAGED)
         total += m.size
         if name != ".":
             tops.add(name.split("/")[0])
         if name in tops and not m.isdir():
-            raise UpdateError(DAMAGED)  # the top level must be a folder, not a file or link
+            raise UpdateError(DAMAGED)  # the top level must be a folder, not a file
     if len(tops) != 1 or total > MAX_UNPACKED:
         raise UpdateError(DAMAGED)
     return tops.pop()
@@ -89,7 +77,8 @@ def _check_members(members: list[tarfile.TarInfo]) -> str:
 def extract_release(tar_path: Path, dest: Path) -> Path:
     """Unpack a release tarball into `dest` and return the single folder GitHub wraps it in.
 
-    Every member is checked before anything is written, so a bad archive leaves `dest` empty.
+    Every member is checked before anything is written, so an unsafe archive leaves `dest` empty. (A
+    tarball cut short part-way can still leave some files behind: the caller deletes the folder.)
     Disk errors are let through as OSError, since they mean something different to the person.
     """
     try:
@@ -102,7 +91,12 @@ def extract_release(tar_path: Path, dest: Path) -> Path:
                 # Older 3.11 has no filter, so do its other job by hand: no setuid, no group/other write.
                 for m in members:
                     m.mode &= 0o755
-                tar.extractall(dest)
+                if hasattr(tarfile, "fully_trusted_filter"):
+                    # Only reached when tests switch the data filter off; ask for no filter, so they show
+                    # the checks above are enough by themselves.
+                    tar.extractall(dest, filter="fully_trusted")
+                else:
+                    tar.extractall(dest)
     except (tarfile.TarError, EOFError, zlib.error, gzip.BadGzipFile) as e:
         raise UpdateError(DAMAGED) from e
     folder = dest / top
