@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 import urllib.error
+from http.client import IncompleteRead
 from pathlib import Path
 from unittest import mock
 
@@ -156,6 +157,19 @@ class Download(unittest.TestCase):
         with self.assertRaises(http.HttpError) as cm:
             http.download("https://codeload.github.com/x", self.dest, allowed_hosts=self.HOSTS)
         self.assertEqual(cm.exception.status, 404)
+        self.assertFalse(self.dest.exists())
+
+    def test_connection_cut_mid_body(self):
+        class Cut(StreamResponse):
+            def read(self, n=-1):
+                if self.stream.tell():
+                    raise IncompleteRead(b"ab")
+                return self.stream.read(2)
+
+        self.use(lambda req, timeout=None: Cut(b"abcd", "https://codeload.github.com/x"))
+        with self.assertRaises(http.HttpError) as cm:
+            http.download("https://codeload.github.com/x", self.dest, allowed_hosts=self.HOSTS)
+        self.assertEqual(cm.exception.status, 0)
         self.assertFalse(self.dest.exists())
 
 
